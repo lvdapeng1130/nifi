@@ -56,7 +56,6 @@ import org.apache.nifi.provenance.StandardProvenanceEventRecord;
 import org.apache.nifi.stream.io.ByteCountingInputStream;
 import org.apache.nifi.stream.io.ByteCountingOutputStream;
 import org.apache.nifi.stream.io.StreamUtils;
-import org.rocksdb.Checkpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,6 +85,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -564,7 +565,7 @@ public final class StandardProcessSession implements ProcessSession, ProvenanceE
 
         final Map<String, Long> combined = new HashMap<>();
         combined.putAll(first);
-        combined.putAll(second);
+        second.forEach((key, value) -> combined.merge(key, value, Long::sum));
         return combined;
     }
 
@@ -3365,7 +3366,6 @@ public final class StandardProcessSession implements ProcessSession, ProvenanceE
 
         private final Map<Long, StandardRepositoryRecord> records = new ConcurrentHashMap<>();
         private final Map<String, StandardFlowFileEvent> connectionCounts = new ConcurrentHashMap<>();
-        private final Map<FlowFileQueue, Set<FlowFileRecord>> unacknowledgedFlowFiles = new ConcurrentHashMap<>();
 
         private Map<String, Long> countersOnCommit = new HashMap<>();
         private Map<String, Long> immediateCounters = new HashMap<>();
@@ -3392,20 +3392,10 @@ public final class StandardProcessSession implements ProcessSession, ProvenanceE
             this.reportedEvents.addAll(session.provenanceReporter.getEvents());
 
             this.records.putAll(session.records);
-            this.connectionCounts.putAll(session.connectionCounts);
-            this.unacknowledgedFlowFiles.putAll(session.unacknowledgedFlowFiles);
 
-            if (session.countersOnCommit != null) {
-                if (this.countersOnCommit.isEmpty()) {
-                    this.countersOnCommit.putAll(session.countersOnCommit);
-                } else {
-                    session.countersOnCommit.forEach((key, value) -> this.countersOnCommit.merge(key, value, (v1, v2) -> v1 + v2));
-                }
-            }
-
-            if (session.immediateCounters != null) {
-                this.immediateCounters.putAll(session.immediateCounters);
-            }
+            mergeMapsWithMutableValue(this.connectionCounts, session.connectionCounts, (destination, toMerge) -> destination.add(toMerge));
+            mergeMaps(this.countersOnCommit, session.countersOnCommit, Long::sum);
+            mergeMaps(this.immediateCounters, session.immediateCounters, Long::sum);
 
             this.deleteOnCommit.putAll(session.deleteOnCommit);
             this.removedFlowFiles.addAll(session.removedFlowFiles);
@@ -3419,6 +3409,41 @@ public final class StandardProcessSession implements ProcessSession, ProvenanceE
             this.flowFilesOut += session.flowFilesOut;
             this.contentSizeIn += session.contentSizeIn;
             this.contentSizeOut += session.contentSizeOut;
+        }
+
+        private <K, V> void mergeMaps(final Map<K, V> destination, final Map<K, V> toMerge, final BiFunction<? super V, ? super V, ? extends V> merger) {
+            if (toMerge == null) {
+                return;
+            }
+
+            if (destination.isEmpty()) {
+                destination.putAll(toMerge);
+            } else {
+                toMerge.forEach((key, value) -> destination.merge(key, value, merger));
+            }
+        }
+
+        private <K, V> void mergeMapsWithMutableValue(final Map<K, V> destination, final Map<K, V> toMerge, final BiConsumer<? super V, ? super V> merger) {
+            if (toMerge == null) {
+                return;
+            }
+
+            if (destination.isEmpty()) {
+                destination.putAll(toMerge);
+                return;
+            }
+
+            for (final Map.Entry<K, V> entry : toMerge.entrySet()) {
+                final K key = entry.getKey();
+                final V value = entry.getValue();
+
+                final V destinationValue = destination.get(key);
+                if (destinationValue == null) {
+                    destination.put(key, value);
+                } else {
+                    merger.accept(destinationValue, value);
+                }
+            }
         }
 
         private StandardRepositoryRecord getRecord(final FlowFile flowFile) {

@@ -259,6 +259,8 @@ public class NodeClusterCoordinator implements ClusterCoordinator, ProtocolHandl
         this.nodeId = nodeId;
         nodeStatuses.computeIfAbsent(nodeId.getId(), id -> new NodeConnectionStatus(nodeId, DisconnectionCode.NOT_YET_CONNECTED));
         eventListeners.forEach(listener -> listener.onLocalNodeIdentifierSet(nodeId));
+
+        storeState();
     }
 
     @Override
@@ -1056,6 +1058,11 @@ public class NodeClusterCoordinator implements ClusterCoordinator, ProtocolHandl
         logger.debug("Handling request {}", statusChangeMessage);
 
         final NodeConnectionStatus oldStatus = nodeStatuses.get(statusChangeMessage.getNodeId().getId());
+
+        if (oldStatus == null && updatedStatus.getState() == NodeConnectionState.DISCONNECTED ) {
+            // There is no need to tell that node is getting disconnected if there was no status earlier.
+            return;
+        }
 
         // Either remove the value from the map or update the map depending on the connection state
         if (statusChangeMessage.getNodeConnectionStatus().getState() == NodeConnectionState.REMOVED) {

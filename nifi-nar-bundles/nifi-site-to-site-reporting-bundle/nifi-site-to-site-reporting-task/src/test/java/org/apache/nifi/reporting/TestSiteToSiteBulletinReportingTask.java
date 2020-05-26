@@ -19,8 +19,8 @@ package org.apache.nifi.reporting;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -81,7 +81,7 @@ public class TestSiteToSiteBulletinReportingTask {
     public void testSerializedForm() throws IOException, InitializationException {
         // creating the list of bulletins
         final List<Bulletin> bulletins = new ArrayList<Bulletin>();
-        bulletins.add(BulletinFactory.createBulletin("group-id", "group-name", "source-id", "source-name", "category", "severity", "message"));
+        bulletins.add(BulletinFactory.createBulletin("group-id", "group-name", "source-id", ComponentType.PROCESSOR, "source-name", "category", "severity", "message", "group-path"));
 
         // mock the access to the list of bulletins
         final ReportingContext context = Mockito.mock(ReportingContext.class);
@@ -124,7 +124,7 @@ public class TestSiteToSiteBulletinReportingTask {
         JsonObject bulletinJson = jsonReader.readArray().getJsonObject(0);
         assertEquals("message", bulletinJson.getString("bulletinMessage"));
         assertEquals("group-name", bulletinJson.getString("bulletinGroupName"));
-        assertNull(bulletinJson.get("bulletinSourceType"));
+        assertEquals("group-path", bulletinJson.getString("bulletinGroupPath"));
     }
 
     @Test
@@ -183,29 +183,25 @@ public class TestSiteToSiteBulletinReportingTask {
         final List<byte[]> dataSent = new ArrayList<>();
 
         @Override
-        protected SiteToSiteClient getClient() {
-            final SiteToSiteClient client = Mockito.mock(SiteToSiteClient.class);
-            final Transaction transaction = Mockito.mock(Transaction.class);
+        public void setup(ReportingContext reportContext) throws IOException {
+            if(siteToSiteClient == null) {
+                final SiteToSiteClient client = Mockito.mock(SiteToSiteClient.class);
+                final Transaction transaction = Mockito.mock(Transaction.class);
 
-            try {
-                Mockito.doAnswer(new Answer<Object>() {
-                    @Override
-                    public Object answer(final InvocationOnMock invocation) throws Throwable {
+                try {
+                    Mockito.doAnswer((Answer<Object>) invocation -> {
                         final byte[] data = invocation.getArgument(0, byte[].class);
                         dataSent.add(data);
                         return null;
-                    }
-                }).when(transaction).send(Mockito.any(byte[].class), Mockito.anyMap());
+                    }).when(transaction).send(Mockito.any(byte[].class), Mockito.any(Map.class));
 
-                Mockito.when(client.createTransaction(Mockito.any(TransferDirection.class))).thenReturn(transaction);
-            } catch (final Exception e) {
-                e.printStackTrace();
-                Assert.fail(e.toString());
+                    when(client.createTransaction(Mockito.any(TransferDirection.class))).thenReturn(transaction);
+                } catch (final Exception e) {
+                    e.printStackTrace();
+                    Assert.fail(e.toString());
+                }
+                siteToSiteClient = client;
             }
-
-            return client;
         }
-
     }
-
 }

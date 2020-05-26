@@ -137,12 +137,16 @@ public class SiteToSiteBulletinReportingTask extends AbstractSiteToSiteReporting
         final JsonArray jsonArray = arrayBuilder.build();
 
         // Send the JSON document for the current batch
+        Transaction transaction = null;
         try {
-                final Transaction transaction = getClient().createTransaction(TransferDirection.SEND);
-                if (transaction == null) {
-                    getLogger().info("All destination nodes are penalized; will attempt to send data later");
-                    return;
-                }
+            // Lazily create SiteToSiteClient to provide a StateManager
+            setup(context);
+
+            transaction = getClient().createTransaction(TransferDirection.SEND);
+            if (transaction == null) {
+                getLogger().info("All destination nodes are penalized; will attempt to send data later");
+                return;
+            }
 
             final Map<String, String> attributes = new HashMap<>();
             final String transactionId = UUID.randomUUID().toString();
@@ -159,8 +163,15 @@ public class SiteToSiteBulletinReportingTask extends AbstractSiteToSiteReporting
             final long transferMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
             getLogger().info("Successfully sent {} Bulletins to destination in {} ms; Transaction ID = {}; First Event ID = {}",
                     new Object[]{bulletins.size(), transferMillis, transactionId, bulletins.get(0).getId()});
-        } catch (final IOException e) {
-            throw new ProcessException("Failed to send Bulletins to destination due to IOException:" + e.getMessage(), e);
+        } catch (final Exception e) {
+            if (transaction != null) {
+                transaction.error();
+            }
+            if (e instanceof ProcessException) {
+                throw (ProcessException) e;
+            } else {
+                throw new ProcessException("Failed to send Bulletins to destination due to IOException:" + e.getMessage(), e);
+            }
         }
 
         lastSentBulletinId = currMaxId;
@@ -175,6 +186,7 @@ public class SiteToSiteBulletinReportingTask extends AbstractSiteToSiteReporting
         addField(builder, "bulletinCategory", bulletin.getCategory(), allowNullValues);
         addField(builder, "bulletinGroupId", bulletin.getGroupId(), allowNullValues);
         addField(builder, "bulletinGroupName", bulletin.getGroupName(), allowNullValues);
+        addField(builder, "bulletinGroupPath", bulletin.getGroupPath(), allowNullValues);
         addField(builder, "bulletinLevel", bulletin.getLevel(), allowNullValues);
         addField(builder, "bulletinMessage", bulletin.getMessage(), allowNullValues);
         addField(builder, "bulletinNodeAddress", bulletin.getNodeAddress(), allowNullValues);

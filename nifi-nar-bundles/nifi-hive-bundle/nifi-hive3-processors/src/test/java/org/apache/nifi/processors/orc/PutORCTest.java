@@ -18,6 +18,7 @@ package org.apache.nifi.processors.orc;
 
 import org.apache.avro.Schema;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang3.SystemUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -55,6 +56,7 @@ import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -95,7 +97,8 @@ public class PutORCTest {
     private TestRunner testRunner;
 
     @BeforeClass
-    public static void setupLogging() {
+    public static void setupBeforeClass() {
+        Assume.assumeTrue("Test only runs on *nix", !SystemUtils.IS_OS_WINDOWS);
         BasicConfigurator.configure();
     }
 
@@ -446,6 +449,29 @@ public class PutORCTest {
         testRunner.enqueue("trigger");
         testRunner.run();
         testRunner.assertAllFlowFilesTransferred(PutORC.REL_SUCCESS, 1);
+    }
+
+    @Test
+    public void testDDLQuoteTableNameSections() throws IOException, InitializationException {
+        configure(proc, 100);
+
+        final String filename = "testORCWithDefaults-" + System.currentTimeMillis();
+
+        final Map<String, String> flowFileAttributes = new HashMap<>();
+        flowFileAttributes.put(CoreAttributes.FILENAME.key(), filename);
+
+        testRunner.setProperty(PutORC.HIVE_TABLE_NAME, "mydb.myTable");
+
+        testRunner.enqueue("trigger", flowFileAttributes);
+        testRunner.run();
+        testRunner.assertAllFlowFilesTransferred(PutORC.REL_SUCCESS, 1);
+
+        final Path orcFile = new Path(DIRECTORY + "/" + filename);
+
+        // verify the successful flow file has the expected attributes
+        final MockFlowFile mockFlowFile = testRunner.getFlowFilesForRelationship(PutORC.REL_SUCCESS).get(0);
+        mockFlowFile.assertAttributeEquals(PutORC.HIVE_DDL_ATTRIBUTE,
+                "CREATE EXTERNAL TABLE IF NOT EXISTS `mydb`.`myTable` (`name` STRING, `favorite_number` INT, `favorite_color` STRING, `scale` DOUBLE) STORED AS ORC");
     }
 
     private void verifyORCUsers(final Path orcUsers, final int numExpectedUsers) throws IOException {

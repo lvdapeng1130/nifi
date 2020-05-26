@@ -22,8 +22,10 @@ import org.apache.nifi.toolkit.cli.impl.client.nifi.NiFiClientConfig;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.NiFiClientException;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.impl.JerseyNiFiClient;
 import org.apache.nifi.web.api.entity.ClusteSummaryEntity;
+import org.apache.nifi.web.api.entity.ConnectionStatusEntity;
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.rules.TestName;
@@ -31,6 +33,8 @@ import org.junit.rules.Timeout;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -96,11 +100,19 @@ public abstract class NiFiSystemIT {
             if (isDestroyFlowAfterEachTest()) {
                 destroyFlow();
             }
+
+            if (isDestroyEnvironmentAfterEachTest()) {
+                cleanup();
+            }
         } finally {
             if (nifiClient != null) {
                 nifiClient.close();
             }
         }
+    }
+
+    protected boolean isDestroyEnvironmentAfterEachTest() {
+        return false;
     }
 
     protected void destroyFlow() throws NiFiClientException, IOException {
@@ -156,8 +168,12 @@ public abstract class NiFiSystemIT {
     }
 
     protected NiFiClient createClient() {
+        return createClient(getClientApiPort());
+    }
+
+    protected NiFiClient createClient(final int port) {
         final NiFiClientConfig clientConfig = new NiFiClientConfig.Builder()
-            .baseUrl("http://localhost:" + getClientApiPort())
+            .baseUrl("http://localhost:" + port)
             .connectTimeout(30000)
             .readTimeout(30000)
             .build();
@@ -223,7 +239,12 @@ public abstract class NiFiSystemIT {
             new InstanceConfiguration.Builder()
                 .bootstrapConfig("src/test/resources/conf/default/bootstrap.conf")
                 .instanceDirectory("target/standalone-instance")
+                .overrideNifiProperties(getNifiPropertiesOverrides())
                 .build());
+    }
+
+    protected Map<String, String> getNifiPropertiesOverrides() {
+        return Collections.emptyMap();
     }
 
     protected boolean isDestroyFlowAfterEachTest() {
@@ -231,8 +252,33 @@ public abstract class NiFiSystemIT {
     }
 
     protected void waitFor(final BooleanSupplier condition) throws InterruptedException {
+        waitFor(condition, 10L);
+    }
+
+    protected void waitFor(final BooleanSupplier condition, final long delayMillis) throws InterruptedException {
         while (!condition.getAsBoolean()) {
-            Thread.sleep(10L);
+            Thread.sleep(delayMillis);
         }
+    }
+
+    protected void waitForQueueCount(final String connectionId, final int queueSize) throws InterruptedException {
+        waitFor(() -> {
+            final ConnectionStatusEntity statusEntity = getConnectionStatus(connectionId);
+            return statusEntity.getConnectionStatus().getAggregateSnapshot().getFlowFilesQueued() == queueSize;
+        });
+    }
+
+    private ConnectionStatusEntity getConnectionStatus(final String connectionId) {
+        try {
+            return getNifiClient().getFlowClient().getConnectionStatus(connectionId, true);
+        } catch (final Exception e) {
+            Assert.fail("Failed to obtain connection status");
+            return null;
+        }
+    }
+
+    protected int getConnectionQueueSize(final String connectionId) {
+        final ConnectionStatusEntity statusEntity = getConnectionStatus(connectionId);
+        return statusEntity.getConnectionStatus().getAggregateSnapshot().getFlowFilesQueued();
     }
 }

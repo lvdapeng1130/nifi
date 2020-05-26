@@ -16,7 +16,10 @@
  */
 package org.apache.nifi.util;
 
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * String Utils based on the Apache Commons Lang String Utils.
@@ -38,8 +41,16 @@ public class StringUtils {
         return true;
     }
 
+    public static boolean isNotBlank(final String str) {
+        return !isBlank(str);
+    }
+
     public static boolean isEmpty(final String str) {
         return str == null || str.isEmpty();
+    }
+
+    public static boolean isNotEmpty(final String str) {
+        return !isEmpty(str);
     }
 
     public static boolean startsWith(final String str, final String prefix) {
@@ -469,4 +480,28 @@ public class StringUtils {
         return str;
     }
 
+    /**
+     * Returns the string in "title case" (i.e. every word capitalized). If the input is {@code null} or blank, returns
+     * an empty string. Leading and trailing spaces are trimmed, and multiple internal spaces are condensed.
+     *
+     * Examples:
+     *
+     * this is a sentence -> This Is A Sentence
+     * allOneWord -> Alloneword
+     * PREVIOUSLY UPPERCASE -> Previously Uppercase
+     * multiple   spaces -> Multiple Spaces
+     *
+     * @param input the input string
+     * @return the titlecased string
+     */
+    public static String toTitleCase(String input) {
+        if (input == null || isBlank(input)) {
+            return "";
+        }
+        List<String> elements = Arrays.asList(input.trim().toLowerCase().split("\\s"));
+        return elements.stream()
+                .filter(word -> !StringUtils.isBlank(word))
+                .map(word -> Character.toTitleCase(word.charAt(0)) + word.substring(1))
+                .collect(Collectors.joining(" "));
+    }
 }
