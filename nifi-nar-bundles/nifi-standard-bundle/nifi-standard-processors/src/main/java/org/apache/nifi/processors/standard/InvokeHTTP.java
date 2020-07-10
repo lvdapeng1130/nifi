@@ -57,6 +57,7 @@ import javax.annotation.Nullable;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLSession;
 import okhttp3.Cache;
+import okhttp3.ConnectionPool;
 import okhttp3.Credentials;
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
@@ -202,6 +203,24 @@ public class InvokeHTTP extends AbstractProcessor {
             .addValidator(StandardValidators.TIME_PERIOD_VALIDATOR)
             .build();
 
+    public static final PropertyDescriptor PROP_IDLE_TIMEOUT = new PropertyDescriptor.Builder()
+            .name("idle-timeout")
+            .displayName("Idle Timeout")
+            .description("Max idle time before closing connection to the remote service.")
+            .required(true)
+            .defaultValue("5 mins")
+            .addValidator(StandardValidators.createTimePeriodValidator(1, TimeUnit.MILLISECONDS, Integer.MAX_VALUE, TimeUnit.SECONDS))
+            .build();
+
+    public static final PropertyDescriptor PROP_MAX_IDLE_CONNECTIONS = new PropertyDescriptor.Builder()
+            .name("max-idle-connections")
+            .displayName("Max Idle Connections")
+            .description("Max number of idle connections to keep open.")
+            .required(true)
+            .defaultValue("5")
+            .addValidator(StandardValidators.INTEGER_VALIDATOR)
+            .build();
+
     public static final PropertyDescriptor PROP_DATE_HEADER = new PropertyDescriptor.Builder()
             .name("Include Date Header")
             .description("Include an RFC-2616 Date header in the request.")
@@ -228,6 +247,16 @@ public class InvokeHTTP extends AbstractProcessor {
                     + "language will be the header value.")
             .required(false)
             .addValidator(StandardValidators.REGULAR_EXPRESSION_VALIDATOR)
+            .build();
+
+    public static final PropertyDescriptor PROP_USERAGENT = new PropertyDescriptor.Builder()
+            .name("Useragent")
+            .displayName("Useragent")
+            .description("The Useragent identifier sent along with each request")
+            .required(false)
+            .defaultValue("Apache Nifi/${nifi.version} (git:${nifi.build.git.commit.id.describe}; https://nifi.apache.org/)")
+            .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
 
     public static final PropertyDescriptor PROP_SSL_CONTEXT_SERVICE = new PropertyDescriptor.Builder()
@@ -456,9 +485,12 @@ public class InvokeHTTP extends AbstractProcessor {
             PROP_SSL_CONTEXT_SERVICE,
             PROP_CONNECT_TIMEOUT,
             PROP_READ_TIMEOUT,
+            PROP_IDLE_TIMEOUT,
+            PROP_MAX_IDLE_CONNECTIONS,
             PROP_DATE_HEADER,
             PROP_FOLLOW_REDIRECTS,
             PROP_ATTRIBUTES_TO_SEND,
+            PROP_USERAGENT,
             PROP_BASIC_AUTH_USERNAME,
             PROP_BASIC_AUTH_PASSWORD,
             PROXY_CONFIGURATION_SERVICE,
@@ -715,6 +747,14 @@ public class InvokeHTTP extends AbstractProcessor {
         // Set timeouts
         okHttpClientBuilder.connectTimeout((context.getProperty(PROP_CONNECT_TIMEOUT).asTimePeriod(TimeUnit.MILLISECONDS).intValue()), TimeUnit.MILLISECONDS);
         okHttpClientBuilder.readTimeout(context.getProperty(PROP_READ_TIMEOUT).asTimePeriod(TimeUnit.MILLISECONDS).intValue(), TimeUnit.MILLISECONDS);
+
+        // Set connectionpool limits
+        okHttpClientBuilder.connectionPool(
+                new ConnectionPool(
+                        context.getProperty(PROP_MAX_IDLE_CONNECTIONS).asInteger(),
+                        context.getProperty(PROP_IDLE_TIMEOUT).asTimePeriod(TimeUnit.MILLISECONDS).intValue(), TimeUnit.MILLISECONDS
+                )
+        );
 
         // Set whether to follow redirects
         okHttpClientBuilder.followRedirects(context.getProperty(PROP_FOLLOW_REDIRECTS).asBoolean());
@@ -1003,6 +1043,11 @@ public class InvokeHTTP extends AbstractProcessor {
                 break;
             default:
                 requestBuilder = requestBuilder.method(method, null);
+        }
+
+        String userAgent = trimToEmpty(context.getProperty(PROP_USERAGENT).evaluateAttributeExpressions(requestFlowFile).getValue());
+        if (!userAgent.isEmpty()) {
+            requestBuilder.addHeader("User-Agent", userAgent);
         }
 
         requestBuilder = setHeaderProperties(context, requestBuilder, requestFlowFile);
