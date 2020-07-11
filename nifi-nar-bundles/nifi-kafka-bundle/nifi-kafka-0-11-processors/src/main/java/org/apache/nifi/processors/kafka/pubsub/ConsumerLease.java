@@ -406,6 +406,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
         flowFile = session.putAllAttributes(flowFile, getAttributes(record));
         tracker.updateFlowFile(flowFile);
         populateAttributes(tracker);
+        session.adjustCounter("Records Received", 1L, false);//ldp20200416
         session.transfer(tracker.flowFile, REL_SUCCESS);
     }
 
@@ -451,6 +452,7 @@ public abstract class ConsumerLease implements Closeable, ConsumerRebalanceListe
 
             tracker.updateFlowFile(flowFile);
             bundleMap.put(bundleInfo, tracker);
+            session.adjustCounter("Records Received", 1L, false);//ldp20200416
         }
     }
 

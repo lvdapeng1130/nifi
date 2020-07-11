@@ -96,6 +96,18 @@ language governing permissions and limitations under the License. -->
             <artifactId>nifi-api</artifactId>
             <version>1.12.0-SNAPSHOT</version>
         </dependency>
+        <!--ldp-->
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-client-dto</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi.registry</groupId>
+            <artifactId>nifi-registry-data-model</artifactId>
+            <version>${nifi.registry.version}</version>
+        </dependency>
+        <!--ldp-->
         <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-framework-api</artifactId>

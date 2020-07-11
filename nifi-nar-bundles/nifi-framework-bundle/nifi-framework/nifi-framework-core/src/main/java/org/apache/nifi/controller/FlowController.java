@@ -16,38 +16,6 @@
  */
 package org.apache.nifi.controller;
 
-import static java.util.Objects.requireNonNull;
-
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.lang.management.GarbageCollectorMXBean;
-import java.lang.management.ManagementFactory;
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.stream.Collectors;
-import javax.management.NotificationEmitter;
-import javax.net.ssl.SSLContext;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.admin.service.AuditService;
 import org.apache.nifi.annotation.lifecycle.OnConfigurationRestored;
@@ -66,25 +34,14 @@ import org.apache.nifi.cluster.coordination.node.ClusterRoles;
 import org.apache.nifi.cluster.coordination.node.DisconnectionCode;
 import org.apache.nifi.cluster.coordination.node.NodeConnectionState;
 import org.apache.nifi.cluster.coordination.node.NodeConnectionStatus;
-import org.apache.nifi.cluster.protocol.DataFlow;
-import org.apache.nifi.cluster.protocol.Heartbeat;
-import org.apache.nifi.cluster.protocol.HeartbeatPayload;
-import org.apache.nifi.cluster.protocol.NodeIdentifier;
-import org.apache.nifi.cluster.protocol.NodeProtocolSender;
-import org.apache.nifi.cluster.protocol.UnknownServiceAddressException;
+import org.apache.nifi.cluster.protocol.*;
 import org.apache.nifi.cluster.protocol.message.HeartbeatMessage;
 import org.apache.nifi.components.state.StateManagerProvider;
 import org.apache.nifi.components.validation.StandardValidationTrigger;
 import org.apache.nifi.components.validation.TriggerValidationTask;
 import org.apache.nifi.components.validation.ValidationStatus;
 import org.apache.nifi.components.validation.ValidationTrigger;
-import org.apache.nifi.connectable.Connectable;
-import org.apache.nifi.connectable.ConnectableType;
-import org.apache.nifi.connectable.Connection;
-import org.apache.nifi.connectable.Funnel;
-import org.apache.nifi.connectable.Port;
-import org.apache.nifi.connectable.Position;
-import org.apache.nifi.connectable.StandardConnection;
+import org.apache.nifi.connectable.*;
 import org.apache.nifi.controller.cluster.ClusterProtocolHeartbeater;
 import org.apache.nifi.controller.cluster.Heartbeater;
 import org.apache.nifi.controller.exception.CommunicationsException;
@@ -93,58 +50,21 @@ import org.apache.nifi.controller.flow.StandardFlowManager;
 import org.apache.nifi.controller.kerberos.KerberosConfig;
 import org.apache.nifi.controller.leader.election.LeaderElectionManager;
 import org.apache.nifi.controller.leader.election.LeaderElectionStateChangeListener;
-import org.apache.nifi.controller.queue.ConnectionEventListener;
-import org.apache.nifi.controller.queue.FlowFileQueue;
-import org.apache.nifi.controller.queue.FlowFileQueueFactory;
-import org.apache.nifi.controller.queue.LoadBalanceStrategy;
-import org.apache.nifi.controller.queue.QueueSize;
-import org.apache.nifi.controller.queue.StandardFlowFileQueue;
+import org.apache.nifi.controller.queue.*;
 import org.apache.nifi.controller.queue.clustered.ContentRepositoryFlowFileAccess;
 import org.apache.nifi.controller.queue.clustered.SocketLoadBalancedFlowFileQueue;
 import org.apache.nifi.controller.queue.clustered.client.StandardLoadBalanceFlowFileCodec;
 import org.apache.nifi.controller.queue.clustered.client.async.nio.NioAsyncLoadBalanceClientFactory;
 import org.apache.nifi.controller.queue.clustered.client.async.nio.NioAsyncLoadBalanceClientRegistry;
 import org.apache.nifi.controller.queue.clustered.client.async.nio.NioAsyncLoadBalanceClientTask;
-import org.apache.nifi.controller.queue.clustered.server.ClusterLoadBalanceAuthorizer;
-import org.apache.nifi.controller.queue.clustered.server.ConnectionLoadBalanceServer;
-import org.apache.nifi.controller.queue.clustered.server.LoadBalanceAuthorizer;
-import org.apache.nifi.controller.queue.clustered.server.LoadBalanceProtocol;
-import org.apache.nifi.controller.queue.clustered.server.StandardLoadBalanceProtocol;
+import org.apache.nifi.controller.queue.clustered.server.*;
 import org.apache.nifi.controller.reporting.ReportingTaskInstantiationException;
 import org.apache.nifi.controller.reporting.ReportingTaskProvider;
-import org.apache.nifi.controller.repository.ContentRepository;
-import org.apache.nifi.controller.repository.CounterRepository;
-import org.apache.nifi.controller.repository.EncryptedRepositoryRecordSerdeFactory;
-import org.apache.nifi.controller.repository.FlowFileEventRepository;
-import org.apache.nifi.controller.repository.FlowFileRecord;
-import org.apache.nifi.controller.repository.FlowFileRepository;
-import org.apache.nifi.controller.repository.FlowFileSwapManager;
-import org.apache.nifi.controller.repository.QueueProvider;
-import org.apache.nifi.controller.repository.RepositoryStatusReport;
-import org.apache.nifi.controller.repository.StandardCounterRepository;
-import org.apache.nifi.controller.repository.StandardFlowFileRecord;
-import org.apache.nifi.controller.repository.StandardQueueProvider;
-import org.apache.nifi.controller.repository.StandardRepositoryRecord;
-import org.apache.nifi.controller.repository.SwapManagerInitializationContext;
-import org.apache.nifi.controller.repository.SwapSummary;
-import org.apache.nifi.controller.repository.WriteAheadFlowFileRepository;
-import org.apache.nifi.controller.repository.claim.ContentClaim;
-import org.apache.nifi.controller.repository.claim.ContentDirection;
-import org.apache.nifi.controller.repository.claim.ResourceClaim;
-import org.apache.nifi.controller.repository.claim.ResourceClaimManager;
-import org.apache.nifi.controller.repository.claim.StandardContentClaim;
-import org.apache.nifi.controller.repository.claim.StandardResourceClaimManager;
+import org.apache.nifi.controller.repository.*;
+import org.apache.nifi.controller.repository.claim.*;
 import org.apache.nifi.controller.repository.io.LimitedInputStream;
-import org.apache.nifi.controller.scheduling.EventDrivenSchedulingAgent;
-import org.apache.nifi.controller.scheduling.QuartzSchedulingAgent;
-import org.apache.nifi.controller.scheduling.RepositoryContextFactory;
-import org.apache.nifi.controller.scheduling.StandardProcessScheduler;
-import org.apache.nifi.controller.scheduling.TimerDrivenSchedulingAgent;
-import org.apache.nifi.controller.serialization.FlowSerializationException;
-import org.apache.nifi.controller.serialization.FlowSerializer;
-import org.apache.nifi.controller.serialization.FlowSynchronizationException;
-import org.apache.nifi.controller.serialization.FlowSynchronizer;
-import org.apache.nifi.controller.serialization.ScheduledStateLookup;
+import org.apache.nifi.controller.scheduling.*;
+import org.apache.nifi.controller.serialization.*;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
 import org.apache.nifi.controller.service.StandardConfigurationContext;
@@ -155,11 +75,7 @@ import org.apache.nifi.controller.status.analytics.CachingConnectionStatusAnalyt
 import org.apache.nifi.controller.status.analytics.ConnectionStatusAnalytics;
 import org.apache.nifi.controller.status.analytics.StatusAnalyticsEngine;
 import org.apache.nifi.controller.status.analytics.StatusAnalyticsModelMapFactory;
-import org.apache.nifi.controller.status.history.ComponentStatusRepository;
-import org.apache.nifi.controller.status.history.GarbageCollectionHistory;
-import org.apache.nifi.controller.status.history.GarbageCollectionStatus;
-import org.apache.nifi.controller.status.history.StandardGarbageCollectionStatus;
-import org.apache.nifi.controller.status.history.StatusHistoryUtil;
+import org.apache.nifi.controller.status.history.*;
 import org.apache.nifi.controller.tasks.ExpireFlowFiles;
 import org.apache.nifi.diagnostics.SystemDiagnostics;
 import org.apache.nifi.diagnostics.SystemDiagnosticsFactory;
@@ -180,32 +96,17 @@ import org.apache.nifi.parameter.ParameterLookup;
 import org.apache.nifi.parameter.StandardParameterContextManager;
 import org.apache.nifi.processor.Processor;
 import org.apache.nifi.processor.Relationship;
-import org.apache.nifi.provenance.ComponentIdentifierLookup;
-import org.apache.nifi.provenance.IdentifierLookup;
-import org.apache.nifi.provenance.ProvenanceAuthorizableFactory;
-import org.apache.nifi.provenance.ProvenanceEventRecord;
-import org.apache.nifi.provenance.ProvenanceEventType;
-import org.apache.nifi.provenance.ProvenanceRepository;
-import org.apache.nifi.provenance.StandardProvenanceAuthorizableFactory;
-import org.apache.nifi.provenance.StandardProvenanceEventRecord;
+import org.apache.nifi.provenance.*;
 import org.apache.nifi.registry.VariableRegistry;
 import org.apache.nifi.registry.flow.FlowRegistryClient;
 import org.apache.nifi.registry.flow.VersionedConnection;
 import org.apache.nifi.registry.flow.VersionedProcessGroup;
 import org.apache.nifi.registry.variable.MutableVariableRegistry;
-import org.apache.nifi.remote.HttpRemoteSiteListener;
-import org.apache.nifi.remote.RemoteGroupPort;
-import org.apache.nifi.remote.RemoteResourceManager;
-import org.apache.nifi.remote.RemoteSiteListener;
-import org.apache.nifi.remote.SocketRemoteSiteListener;
+import org.apache.nifi.remote.*;
 import org.apache.nifi.remote.cluster.NodeInformant;
 import org.apache.nifi.remote.protocol.socket.SocketFlowFileServerProtocol;
-import org.apache.nifi.reporting.Bulletin;
-import org.apache.nifi.reporting.BulletinRepository;
-import org.apache.nifi.reporting.ReportingTask;
-import org.apache.nifi.reporting.Severity;
-import org.apache.nifi.reporting.StandardEventAccess;
-import org.apache.nifi.reporting.UserAwareEventAccess;
+import org.apache.nifi.reporting.*;
+import org.apache.nifi.reporting.bo.KyCounter;
 import org.apache.nifi.scheduling.SchedulingStrategy;
 import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.security.util.TlsConfiguration;
@@ -224,6 +125,22 @@ import org.apache.nifi.web.api.dto.status.StatusHistoryDTO;
 import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.management.NotificationEmitter;
+import javax.net.ssl.SSLContext;
+import java.io.*;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
+import java.net.InetSocketAddress;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
+
+import static java.util.Objects.requireNonNull;
 
 public class FlowController implements ReportingTaskProvider, Authorizable, NodeTypeProvider {
 
@@ -2023,6 +1940,27 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         final CounterRepository counterRepo = counterRepositoryRef.get();
         final Counter resetValue = counterRepo.resetCounter(identifier);
         return resetValue;
+    }
+
+    public List<KyCounter> getKyCounters() {
+        final List<KyCounter> counters = new ArrayList<>();
+
+        final CounterRepository counterRepo = counterRepositoryRef.get();
+        for (final Counter counter : counterRepo.getCounters()) {
+            KyCounter kyCounter=new KyCounter(counter.getIdentifier(),counter.getContext(),counter.getName());
+            kyCounter.adjust(counter.getValue());
+            counters.add(kyCounter);
+        }
+
+        return counters;
+    }
+
+    public KyCounter resetKyCounter(final String identifier) {
+        final CounterRepository counterRepo = counterRepositoryRef.get();
+        final Counter resetValue = counterRepo.resetCounter(identifier);
+        KyCounter kyCounter=new KyCounter(resetValue.getIdentifier(),resetValue.getContext(),resetValue.getName());
+        kyCounter.adjust(resetValue.getValue());
+        return kyCounter;
     }
 
     //

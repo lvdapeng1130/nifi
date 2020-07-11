@@ -248,15 +248,12 @@ public abstract class AbstractQueryDatabaseTable extends AbstractDatabaseFetchPr
         final String fragmentIdentifier = UUID.randomUUID().toString();
 
         try (final Connection con = dbcpService.getConnection(Collections.emptyMap());
-             final Statement st = con.createStatement()) {
-
-            if (fetchSize != null && fetchSize > 0) {
-                try {
-                    st.setFetchSize(fetchSize);
-                } catch (SQLException se) {
-                    // Not all drivers support this, just log the error (at debug level) and move on
-                    logger.debug("Cannot set fetch size to {} due to {}", new Object[]{fetchSize, se.getLocalizedMessage()}, se);
-                }
+             final Statement st = dbAdapter.getStatement(con)) {
+            try {
+                dbAdapter.setFetchSize(con,st,fetchSize);
+            } catch (SQLException se) {
+                // Not all drivers support this, just log the error (at debug level) and move on
+                logger.debug("Cannot set fetch size to {} due to {}", new Object[]{fetchSize, se.getLocalizedMessage()}, se);
             }
 
             if (transIsolationLevel != null) {
@@ -323,6 +320,7 @@ public abstract class AbstractQueryDatabaseTable extends AbstractDatabaseFetchPr
                         resultSetFlowFiles.add(fileToProcess);
                         // If we've reached the batch size, send out the flow files
                         if (outputBatchSize > 0 && resultSetFlowFiles.size() >= outputBatchSize) {
+                            session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
                             session.transfer(resultSetFlowFiles, REL_SUCCESS);
                             session.commit();
                             resultSetFlowFiles.clear();
@@ -377,7 +375,7 @@ public abstract class AbstractQueryDatabaseTable extends AbstractDatabaseFetchPr
             } catch (final SQLException e) {
                 throw e;
             }
-
+            session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
             session.transfer(resultSetFlowFiles, REL_SUCCESS);
 
         } catch (final ProcessException | SQLException e) {

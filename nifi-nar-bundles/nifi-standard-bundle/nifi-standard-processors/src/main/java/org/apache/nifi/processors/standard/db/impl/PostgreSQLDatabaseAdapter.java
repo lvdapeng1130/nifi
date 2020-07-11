@@ -24,15 +24,15 @@ import java.sql.Statement;
 /**
  * A generic database adapter that generates MySQL compatible SQL.
  */
-public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
+public class PostgreSQLDatabaseAdapter extends GenericDatabaseAdapter {
     @Override
     public String getName() {
-        return "MySQL";
+        return "PostgreSQL";
     }
 
     @Override
     public String getDescription() {
-        return "Generates MySQL compatible SQL";
+        return "Generates PostgreSQL compatible SQL";
     }
 
     @Override
@@ -43,13 +43,19 @@ public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
 
     @Override
     public Statement getStatement(Connection con) throws SQLException {
-        return con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+        return con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.FETCH_FORWARD);
     }
 
     @Override
-    public void setFetchSize(final Connection con,Statement statement, Integer fetchSize) throws SQLException {
+    public void setFetchSize(Connection con,final Statement statement,Integer fetchSize) throws SQLException {
         if (fetchSize != null && fetchSize > 0) {
-            statement.setFetchSize(Integer.MIN_VALUE);
+            this.setAutoCommit(con,false);
+            statement.setFetchSize(fetchSize);
         }
+    }
+
+    @Override
+    public void setAutoCommit(Connection con, boolean autoCommit) throws SQLException {
+        con.setAutoCommit(autoCommit);
     }
 }

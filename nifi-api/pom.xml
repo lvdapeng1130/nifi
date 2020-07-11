@@ -23,6 +23,19 @@
     <artifactId>nifi-api</artifactId>
     <packaging>jar</packaging>
     <!-- This module should kept to having no dependencies -->
+    <!--ldp20200426改-->
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-client-dto</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi.registry</groupId>
+            <artifactId>nifi-registry-data-model</artifactId>
+            <version>${nifi.registry.version}</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>

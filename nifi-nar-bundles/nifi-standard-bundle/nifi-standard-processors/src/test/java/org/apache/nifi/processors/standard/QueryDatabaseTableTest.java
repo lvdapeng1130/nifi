@@ -1368,6 +1368,24 @@ public class QueryDatabaseTableTest {
         }
     }
 
+    private class OracleServiceSimpleImpl extends AbstractControllerService implements DBCPService {
+
+        @Override
+        public String getIdentifier() {
+            return "oracle";
+        }
+
+        @Override
+        public Connection getConnection() throws ProcessException {
+            try {
+                Class.forName("oracle.jdbc.driver.OracleDriver");
+                return DriverManager.getConnection("jdbc:oracle:thin:@192.168.0.252:1521:orcl","win2ky","");
+            } catch (final Exception e) {
+                throw new ProcessException("getConnection failed: " + e);
+            }
+        }
+    }
+
     @Stateful(scopes = Scope.CLUSTER, description = "Mock for QueryDatabaseTable processor")
     private static class MockQueryDatabaseTable extends QueryDatabaseTable {
         void putColumnType(String colName, Integer colType) {

@@ -16,6 +16,10 @@
  */
 package org.apache.nifi.processors.standard.db;
 
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+
 /**
  * Interface for RDBMS/JDBC-specific code.
  */
@@ -24,6 +28,20 @@ public interface DatabaseAdapter {
     String getName();
 
     String getDescription();
+
+    default Statement getStatement(final Connection con) throws SQLException{
+        return con.createStatement();
+    }
+
+    default void setFetchSize(final Connection con,final Statement statement,Integer fetchSize) throws SQLException {
+        if (fetchSize != null && fetchSize > 0) {
+            statement.setFetchSize(fetchSize);
+        }
+    }
+
+    default void setAutoCommit(final Connection con,boolean autoCommit) throws SQLException {
+
+    }
 
     /**
      * Returns a SQL SELECT statement with the given clauses applied.

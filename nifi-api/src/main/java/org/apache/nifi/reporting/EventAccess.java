@@ -20,6 +20,7 @@ import org.apache.nifi.action.Action;
 import org.apache.nifi.controller.status.ProcessGroupStatus;
 import org.apache.nifi.provenance.ProvenanceEventRecord;
 import org.apache.nifi.provenance.ProvenanceEventRepository;
+import org.apache.nifi.reporting.bo.KyCounter;
 
 import java.io.IOException;
 import java.util.List;
@@ -63,5 +64,9 @@ public interface EventAccess {
      * @return actions with ids greater than or equal to firstActionID, up to the max number of actions
      */
     List<Action> getFlowChanges(int firstActionId, final int maxActions);
+
+    List<KyCounter> getKyCounters();
+
+    KyCounter resetKyCounter(final String identifier);
 
 }
