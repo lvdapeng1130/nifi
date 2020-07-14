@@ -102,14 +102,14 @@ Added user jane
 
 Reset password, you will be prompted for password:
 ```
->java -jar nifi-file-identity-provider-1.0.0-cli.jar reset credentials.xml jane
+>java -jar nifi-file-identity-provider-1.0.0-cli.jar reset login-credentials.xml jane
 New Password for jane:
 Password reset for user jane
 ```
 
 List users
 ```
->java -jar nifi-file-identity-provider-1.0.0-cli.jar list credentials.xml
+>java -jar nifi-file-identity-provider-1.0.0-cli.jar list login-credentials.xml
 john
 jane
 frank
