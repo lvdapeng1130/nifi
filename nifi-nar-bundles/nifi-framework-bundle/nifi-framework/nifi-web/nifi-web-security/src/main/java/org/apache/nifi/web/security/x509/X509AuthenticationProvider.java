@@ -18,11 +18,7 @@ package org.apache.nifi.web.security.x509;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.authentication.AuthenticationResponse;
-import org.apache.nifi.authorization.AccessDeniedException;
-import org.apache.nifi.authorization.Authorizer;
-import org.apache.nifi.authorization.RequestAction;
-import org.apache.nifi.authorization.Resource;
-import org.apache.nifi.authorization.UserContextKeys;
+import org.apache.nifi.authorization.*;
 import org.apache.nifi.authorization.resource.Authorizable;
 import org.apache.nifi.authorization.resource.ResourceFactory;
 import org.apache.nifi.authorization.user.NiFiUser;
@@ -35,21 +31,19 @@ import org.apache.nifi.web.security.NiFiAuthenticationProvider;
 import org.apache.nifi.web.security.ProxiedEntitiesUtils;
 import org.apache.nifi.web.security.UntrustedProxyException;
 import org.apache.nifi.web.security.token.NiFiAuthenticationToken;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  *
  */
 public class X509AuthenticationProvider extends NiFiAuthenticationProvider {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(X509AuthenticationProvider.class);
     private static final Authorizable PROXY_AUTHORIZABLE = new Authorizable() {
         @Override
         public Authorizable getParentAuthorizable() {
@@ -121,6 +115,8 @@ public class X509AuthenticationProvider extends NiFiAuthenticationProvider {
                     try {
                         PROXY_AUTHORIZABLE.authorize(authorizer, RequestAction.WRITE, proxy);
                     } catch (final AccessDeniedException e) {
+                        LOGGER.warn(clientAddress);
+                        LOGGER.warn("X509->"+e.getMessage(),e);
                         throw new UntrustedProxyException(String.format("Untrusted proxy %s", identity));
                     }
                 }
