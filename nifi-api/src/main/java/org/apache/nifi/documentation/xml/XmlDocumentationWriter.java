@@ -29,6 +29,7 @@ import org.apache.nifi.annotation.documentation.DeprecationNotice;
 import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.ConfigurableComponent;
+import org.apache.nifi.components.PropertyDependency;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.RequiredPermission;
 import org.apache.nifi.documentation.AbstractDocumentationWriter;
@@ -177,6 +178,7 @@ public class XmlDocumentationWriter extends AbstractDocumentationWriter {
         writeTextElement("expressionLanguageScope", property.getExpressionLanguageScope() == null ? null : property.getExpressionLanguageScope().name());
         writeBooleanElement("dynamicallyModifiesClasspath", property.isDynamicClasspathModifier());
         writeBooleanElement("dynamic", property.isDynamic());
+        writeDependencies(property);
 
         writeEndElement();
     }
@@ -186,6 +188,34 @@ public class XmlDocumentationWriter extends AbstractDocumentationWriter {
         writeTextElement("displayName", allowableValue.getDisplayName());
         writeTextElement("value", allowableValue.getValue());
         writeTextElement("description", allowableValue.getDescription());
+        writeEndElement();
+    }
+
+    private void writeDependencies(final PropertyDescriptor propertyDescriptor) throws IOException {
+        final Set<PropertyDependency> dependencies = propertyDescriptor.getDependencies();
+        if (dependencies == null || dependencies.isEmpty()) {
+            return;
+        }
+
+        writeStartElement("dependencies");
+
+        for (final PropertyDependency dependency : dependencies) {
+            writeStartElement("dependency");
+            writeTextElement("propertyName", dependency.getPropertyName());
+            writeTextElement("propertyDisplayName", dependency.getPropertyDisplayName());
+
+            final Set<String> dependentValues = dependency.getDependentValues();
+            if (dependentValues != null) {
+                writeStartElement("dependentValues");
+                for (final String dependentValue : dependentValues) {
+                    writeTextElement("dependentValue", dependentValue);
+                }
+                writeEndElement();
+            }
+
+            writeEndElement();
+        }
+
         writeEndElement();
     }
 
