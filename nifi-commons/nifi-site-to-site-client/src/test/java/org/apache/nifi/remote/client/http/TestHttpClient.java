@@ -453,7 +453,7 @@ public class TestHttpClient {
         final ServletHandler wrongPathServletHandler = new ServletHandler();
         wrongPathContextHandler.insertHandler(wrongPathServletHandler);
 
-        final SslContextFactory sslContextFactory = new SslContextFactory();
+        final SslContextFactory sslContextFactory = new SslContextFactory.Server();
         sslContextFactory.setKeyStorePath("src/test/resources/certs/keystore.jks");
         sslContextFactory.setKeyStorePassword("passwordpassword");
         sslContextFactory.setKeyStoreType("JKS");
@@ -1376,7 +1376,7 @@ public class TestHttpClient {
 
         try (
                 SiteToSiteClient client = getDefaultBuilder()
-                        .timeout(1, TimeUnit.SECONDS)
+                        .timeout(5, TimeUnit.SECONDS)
                         .portName("output-timeout-data-ex")
                         .build()
         ) {

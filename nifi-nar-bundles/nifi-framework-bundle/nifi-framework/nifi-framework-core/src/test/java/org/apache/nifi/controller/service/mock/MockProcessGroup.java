@@ -31,10 +31,14 @@ import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.Snippet;
 import org.apache.nifi.controller.Template;
 import org.apache.nifi.controller.label.Label;
+import org.apache.nifi.controller.queue.DropFlowFileStatus;
 import org.apache.nifi.controller.service.ControllerServiceNode;
+import org.apache.nifi.groups.BatchCounts;
+import org.apache.nifi.groups.DataValve;
 import org.apache.nifi.groups.FlowFileConcurrency;
 import org.apache.nifi.groups.FlowFileGate;
 import org.apache.nifi.groups.FlowFileOutboundPolicy;
+import org.apache.nifi.groups.NoOpBatchCounts;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.groups.ProcessGroupCounts;
 import org.apache.nifi.groups.RemoteProcessGroup;
@@ -349,6 +353,21 @@ public class MockProcessGroup implements ProcessGroup {
 
     @Override
     public List<Connection> findAllConnections() {
+        return null;
+    }
+
+    @Override
+    public DropFlowFileStatus dropAllFlowFiles(String requestIdentifier, String requestor) {
+        return null;
+    }
+
+    @Override
+    public DropFlowFileStatus getDropAllFlowFilesStatus(String requestIdentifier) {
+        return null;
+    }
+
+    @Override
+    public DropFlowFileStatus cancelDropAllFlowFiles(String requestIdentifier) {
         return null;
     }
 
@@ -726,12 +745,12 @@ public class MockProcessGroup implements ProcessGroup {
     public FlowFileGate getFlowFileGate() {
         return new FlowFileGate() {
             @Override
-            public boolean tryClaim() {
+            public boolean tryClaim(Port port) {
                 return true;
             }
 
             @Override
-            public void releaseClaim() {
+            public void releaseClaim(Port port) {
             }
         };
     }
@@ -762,6 +781,20 @@ public class MockProcessGroup implements ProcessGroup {
     @Override
     public boolean isDataQueuedForProcessing() {
         return false;
+    }
+
+    @Override
+    public BatchCounts getBatchCounts() {
+        return new NoOpBatchCounts();
+    }
+
+    public DataValve getDataValve(Port port) {
+        return null;
+    }
+
+    @Override
+    public DataValve getDataValve() {
+        return null;
     }
 
     @Override

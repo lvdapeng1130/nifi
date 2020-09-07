@@ -17,7 +17,7 @@
     <parent>
         <artifactId>nifi-azure-bundle</artifactId>
         <groupId>org.apache.nifi</groupId>
-        <version>1.12.0-SNAPSHOT</version>
+        <version>1.13.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -27,6 +27,11 @@
         <dependency>
             <groupId>com.microsoft.azure</groupId>
             <artifactId>azure-storage</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-core</artifactId>
+            <version>${azure.core.version}</version>
         </dependency>
         <!-- overriding jackson-core in azure-storage -->
         <dependency>

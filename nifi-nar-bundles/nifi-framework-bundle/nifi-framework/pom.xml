@@ -18,7 +18,7 @@
     <parent>
         <groupId>org.apache.nifi</groupId>
         <artifactId>nifi-framework-bundle</artifactId>
-        <version>1.12.0-SNAPSHOT</version>
+        <version>1.13.0-SNAPSHOT</version>
     </parent>
     <artifactId>nifi-framework</artifactId>
     <packaging>pom</packaging>
@@ -30,6 +30,7 @@
         <module>nifi-site-to-site</module>
         <module>nifi-repository-models</module>
         <module>nifi-flowfile-repo-serialization</module>
+        <module>nifi-framework-components</module>
         <module>nifi-framework-core</module>
         <module>nifi-framework-cluster-protocol</module>
         <module>nifi-framework-cluster</module>

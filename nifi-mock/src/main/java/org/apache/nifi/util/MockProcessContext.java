@@ -91,6 +91,32 @@ public class MockProcessContext extends MockControllerServiceLookup implements P
         this(component,null,stateManager,variableRegistry);
     }
 
+    public MockProcessContext(final ControllerService component,
+                              final MockProcessContext context,
+                              final StateManager stateManager,
+                              final VariableRegistry variableRegistry) {
+        this(component, null, context, stateManager, variableRegistry);
+    }
+
+    public MockProcessContext(final ControllerService component,
+                              final String componentName,
+                              final MockProcessContext context,
+                              final StateManager stateManager,
+                              final VariableRegistry variableRegistry) {
+        this(component, componentName, stateManager, variableRegistry);
+
+        try {
+            annotationData = context.getControllerServiceAnnotationData(component);
+
+            final Map<PropertyDescriptor, String> props = context.getControllerServiceProperties(component);
+            properties.putAll(props);
+
+            super.addControllerServices(context);
+        } catch (IllegalArgumentException e) {
+            // do nothing...the service is being loaded
+        }
+    }
+
     /**
      * Creates a new MockProcessContext for the given Processor with given name
      *
@@ -110,30 +136,7 @@ public class MockProcessContext extends MockControllerServiceLookup implements P
         this.variableRegistry = variableRegistry;
     }
 
-    public MockProcessContext(final ControllerService component,
-                              final MockProcessContext context,
-                              final StateManager stateManager,
-                              final VariableRegistry variableRegistry) {
-        this(component, null, context, stateManager, variableRegistry);
-    }
 
-    public MockProcessContext(final ControllerService component,
-                              final String componentName,
-                              final MockProcessContext context,
-                              final StateManager stateManager,
-                              final VariableRegistry variableRegistry) {
-        this(component, componentName, stateManager, variableRegistry);
-
-        try {
-            annotationData = context.getControllerServiceAnnotationData(component);
-            final Map<PropertyDescriptor, String> props = context.getControllerServiceProperties(component);
-            properties.putAll(props);
-
-            super.addControllerServices(context);
-        } catch (IllegalArgumentException e) {
-            // do nothing...the service is being loaded
-        }
-    }
 
     @Override
     public PropertyValue getProperty(final PropertyDescriptor descriptor) {
@@ -150,7 +153,8 @@ public class MockProcessContext extends MockControllerServiceLookup implements P
         final String setPropertyValue = properties.get(descriptor);
         final String propValue = (setPropertyValue == null) ? descriptor.getDefaultValue() : setPropertyValue;
 
-        return new MockPropertyValue(propValue, this, variableRegistry, (enableExpressionValidation && allowExpressionValidation) ? descriptor : null);
+        final MockPropertyValue propertyValue = new MockPropertyValue(propValue, this, variableRegistry, (enableExpressionValidation && allowExpressionValidation) ? descriptor : null);
+        return propertyValue;
     }
 
     @Override
@@ -160,6 +164,10 @@ public class MockProcessContext extends MockControllerServiceLookup implements P
 
     public ValidationResult setProperty(final String propertyName, final String propertyValue) {
         return setProperty(new PropertyDescriptor.Builder().name(propertyName).build(), propertyValue);
+    }
+
+    public PropertyDescriptor getPropertyDescriptor(final String propertyName) {
+        return component.getPropertyDescriptor(propertyName);
     }
 
     /**
@@ -183,6 +191,7 @@ public class MockProcessContext extends MockControllerServiceLookup implements P
         if (oldValue == null) {
             oldValue = fullyPopulatedDescriptor.getDefaultValue();
         }
+
         if ((value == null && oldValue != null) || (value != null && !value.equals(oldValue))) {
             component.onPropertyModified(fullyPopulatedDescriptor, oldValue, value);
         }
@@ -536,5 +545,4 @@ public class MockProcessContext extends MockControllerServiceLookup implements P
     public InputRequirement getInputRequirement() {
         return inputRequirement;
     }
-
 }

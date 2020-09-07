@@ -17,7 +17,7 @@
 package org.apache.nifi.processors.aws.s3;
 
 import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -64,6 +64,7 @@ public class TestPutS3Object {
     public void setUp() {
         mockS3Client = Mockito.mock(AmazonS3Client.class);
         putS3Object = new PutS3Object() {
+            @Override
             protected AmazonS3Client getClient() {
                 return mockS3Client;
             }
@@ -176,7 +177,7 @@ public class TestPutS3Object {
         PutObjectRequest request = captureRequest.getValue();
 
         ObjectMetadata objectMetadata = request.getMetadata();
-        assertEquals("Iñtërnâtiônàližætiøn.txt", URLDecoder.decode(objectMetadata.getContentDisposition(), "UTF-8"));
+        assertEquals(URLEncoder.encode("Iñtërnâtiônàližætiøn.txt", "UTF-8"), objectMetadata.getContentDisposition());
     }
 
     private void prepareTest() {
@@ -209,7 +210,7 @@ public class TestPutS3Object {
     public void testGetPropertyDescriptors() {
         PutS3Object processor = new PutS3Object();
         List<PropertyDescriptor> pd = processor.getSupportedPropertyDescriptors();
-        assertEquals("size should be eq", 34, pd.size());
+        assertEquals("size should be eq", 38, pd.size());
         assertTrue(pd.contains(PutS3Object.ACCESS_KEY));
         assertTrue(pd.contains(PutS3Object.AWS_CREDENTIALS_PROVIDER_SERVICE));
         assertTrue(pd.contains(PutS3Object.BUCKET));
@@ -232,6 +233,8 @@ public class TestPutS3Object {
         assertTrue(pd.contains(PutS3Object.WRITE_USER_LIST));
         assertTrue(pd.contains(PutS3Object.SERVER_SIDE_ENCRYPTION));
         assertTrue(pd.contains(PutS3Object.ENCRYPTION_SERVICE));
+        assertTrue(pd.contains(PutS3Object.USE_CHUNKED_ENCODING));
+        assertTrue(pd.contains(PutS3Object.USE_PATH_STYLE_ACCESS));
         assertTrue(pd.contains(PutS3Object.PROXY_CONFIGURATION_SERVICE));
         assertTrue(pd.contains(PutS3Object.PROXY_HOST));
         assertTrue(pd.contains(PutS3Object.PROXY_HOST_PORT));
@@ -240,6 +243,8 @@ public class TestPutS3Object {
         assertTrue(pd.contains(PutS3Object.OBJECT_TAGS_PREFIX));
         assertTrue(pd.contains(PutS3Object.REMOVE_TAG_PREFIX));
         assertTrue(pd.contains(PutS3Object.CONTENT_TYPE));
+        assertTrue(pd.contains(PutS3Object.CONTENT_DISPOSITION));
+        assertTrue(pd.contains(PutS3Object.CACHE_CONTROL));
         assertTrue(pd.contains(PutS3Object.MULTIPART_THRESHOLD));
         assertTrue(pd.contains(PutS3Object.MULTIPART_PART_SIZE));
         assertTrue(pd.contains(PutS3Object.MULTIPART_S3_AGEOFF_INTERVAL));

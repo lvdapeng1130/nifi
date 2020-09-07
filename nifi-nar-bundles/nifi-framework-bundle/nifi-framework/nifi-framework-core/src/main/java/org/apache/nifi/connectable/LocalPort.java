@@ -20,9 +20,11 @@ import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.controller.AbstractPort;
 import org.apache.nifi.controller.ProcessScheduler;
 import org.apache.nifi.flowfile.FlowFile;
+import org.apache.nifi.groups.DataValve;
 import org.apache.nifi.groups.FlowFileConcurrency;
 import org.apache.nifi.groups.FlowFileGate;
 import org.apache.nifi.groups.FlowFileOutboundPolicy;
+import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Relationship;
@@ -33,7 +35,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -74,28 +78,20 @@ public class LocalPort extends AbstractPort {
         return maxIterations;
     }
 
-    private boolean[] validateConnections() {
-        // LocalPort requires both in/out.
-        final boolean requireInput = true;
-        final boolean requireOutput = true;
-
-        return new boolean[]{requireInput, hasIncomingConnection(),
-                                requireOutput, !getConnections(Relationship.ANONYMOUS).isEmpty()};
-    }
-
     @Override
     public boolean isValid() {
-        final boolean[] connectionRequirements = validateConnections();
-        return (!connectionRequirements[0] || connectionRequirements[1])
-                 && (!connectionRequirements[2] || connectionRequirements[3]);
+        return hasIncomingConnection() && hasOutboundConnection();
+    }
+
+    private boolean hasOutboundConnection() {
+        return !getConnections(Relationship.ANONYMOUS).isEmpty();
     }
 
     @Override
     public Collection<ValidationResult> getValidationErrors() {
-        final boolean[] connectionRequirements = validateConnections();
         final Collection<ValidationResult> validationErrors = new ArrayList<>();
         // Incoming connections are required but not set
-        if (connectionRequirements[0] && !connectionRequirements[1]) {
+        if (!hasIncomingConnection()) {
             validationErrors.add(new ValidationResult.Builder()
                 .explanation("Port has no incoming connections")
                 .subject(String.format("Port '%s'", getName()))
@@ -104,7 +100,7 @@ public class LocalPort extends AbstractPort {
         }
 
         // Outgoing connections are required but not set
-        if (connectionRequirements[2] && !connectionRequirements[3]) {
+        if (!hasOutboundConnection()) {
             validationErrors.add(new ValidationResult.Builder()
                 .explanation("Port has no outgoing connections")
                 .subject(String.format("Port '%s'", getName()))
@@ -130,9 +126,21 @@ public class LocalPort extends AbstractPort {
     }
 
     private void triggerOutputPort(final ProcessContext context, final ProcessSession session) {
+        final DataValve dataValve = getProcessGroup().getDataValve(this);
+
         final boolean shouldTransfer = isTransferDataOut();
         if (shouldTransfer) {
-            transferUnboundedConcurrency(context, session);
+            if (!dataValve.tryOpenFlowOutOfGroup(getProcessGroup())) {
+                logger.trace("{} will not transfer data out of Process Group because Data Valve prevents data from flowing out of the Process Group", this);
+                context.yield();
+                return;
+            }
+
+            try {
+                transferUnboundedConcurrency(context, session);
+            } finally {
+                dataValve.closeFlowOutOfGroup(getProcessGroup());
+            }
         } else {
             context.yield();
         }
@@ -140,7 +148,7 @@ public class LocalPort extends AbstractPort {
 
     private void triggerInputPort(final ProcessContext context, final ProcessSession session) {
         final FlowFileGate flowFileGate = getProcessGroup().getFlowFileGate();
-        final boolean obtainedClaim = flowFileGate.tryClaim();
+        final boolean obtainedClaim = flowFileGate.tryClaim(this);
         if (!obtainedClaim) {
             logger.trace("{} failed to obtain claim for FlowFileGate. Will yield and will not transfer any FlowFiles", this);
             context.yield();
@@ -158,9 +166,12 @@ public class LocalPort extends AbstractPort {
                 case SINGLE_FLOWFILE_PER_NODE:
                     transferSingleFlowFile(session);
                     break;
+                case SINGLE_BATCH_PER_NODE:
+                    transferInputBatch(session);
+                    break;
             }
         } finally {
-            flowFileGate.releaseClaim();
+            flowFileGate.releaseClaim(this);
             logger.trace("{} released claim for FlowFileGate", this);
         }
     }
@@ -188,6 +199,22 @@ public class LocalPort extends AbstractPort {
         return true;
     }
 
+    private void transferInputBatch(final ProcessSession session) {
+        final ProcessGroup processGroup = getProcessGroup();
+
+        // Transfer all FlowFiles from input queues to output queues, ignoring backpressure on the output queue.
+        // We do this because the Process Group is configured for batch processing, so the downstream processors
+        // will not be able to process the data until the entire batch is ingested. As a result, if backpressure is
+        // applied, it will never cease to be applied until the entire batch is brought in. Therefore, we must ignore
+        // it so that data can be processed.
+        while (session.getQueueSize().getObjectCount() > 0) {
+            final List<FlowFile> flowFiles = session.get(10000);
+            session.transfer(flowFiles, Relationship.ANONYMOUS);
+            session.commit();
+            logger.debug("{} Successfully transferred {} FlowFiles into {}", this, flowFiles.size(), processGroup);
+        }
+    }
+
     private void transferSingleFlowFile(final ProcessSession session) {
         FlowFile flowFile = session.get();
         if (flowFile == null) {
@@ -195,9 +222,16 @@ public class LocalPort extends AbstractPort {
         }
 
         session.transfer(flowFile, Relationship.ANONYMOUS);
+        getProcessGroup().getBatchCounts().reset();
+        logger.debug("{} Transferred Single FlowFile", this);
     }
 
+
     protected void transferUnboundedConcurrency(final ProcessContext context, final ProcessSession session) {
+        final Map<String, String> attributes = new HashMap<>();
+        final Map<String, Integer> counts = getProcessGroup().getBatchCounts().captureCounts();
+        counts.forEach((k, v) -> attributes.put("batch.output." + k, String.valueOf(v)));
+
         Set<Relationship> available = context.getAvailableRelationships();
         int iterations = 0;
         while (!available.isEmpty()) {
@@ -206,8 +240,14 @@ public class LocalPort extends AbstractPort {
                 break;
             }
 
+            if (!attributes.isEmpty()) {
+                flowFiles.forEach(ff -> session.putAllAttributes(ff, attributes));
+            }
+
             session.transfer(flowFiles, Relationship.ANONYMOUS);
             session.commit();
+
+            logger.debug("{} Transferred {} FlowFiles", this, flowFiles.size());
 
             // If there are fewer than 1,000 FlowFiles available to transfer, or if we
             // have hit the configured FlowFile cap, we want to stop. This prevents us from
@@ -219,6 +259,7 @@ public class LocalPort extends AbstractPort {
             available = context.getAvailableRelationships();
         }
     }
+
 
     @Override
     public void updateConnection(final Connection connection) throws IllegalStateException {
@@ -312,6 +353,6 @@ public class LocalPort extends AbstractPort {
 
     @Override
     public String toString() {
-        return "LocalPort[id=" + getIdentifier() + ", type=" + getConnectableType() + "]";
+        return "LocalPort[id=" + getIdentifier() + ", type=" + getConnectableType() + ", name=" + getName() + ", group=" + getProcessGroup().getName() + "]";
     }
 }
