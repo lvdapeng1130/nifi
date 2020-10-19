@@ -16,16 +16,18 @@
  */
 package org.apache.nifi.util;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import org.apache.nifi.action.Action;
 import org.apache.nifi.controller.status.ProcessGroupStatus;
 import org.apache.nifi.provenance.ProvenanceEventRecord;
 import org.apache.nifi.provenance.ProvenanceEventRepository;
 import org.apache.nifi.reporting.EventAccess;
+import org.apache.nifi.reporting.bo.KyCounter;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class MockEventAccess implements EventAccess {
 
@@ -100,23 +102,18 @@ public class MockEventAccess implements EventAccess {
         return actions;
     }
 
+    @Override
+    public List<KyCounter> getKyCounters() {
+        return new ArrayList<>();
+    }
+
+    @Override
+    public KyCounter resetKyCounter(String identifier) {
+        return null;
+    }
+
     public void addFlowChange(final Action action) {
         this.flowChanges.add(action);
     }
 
-    public long getTotalBytesRead() {
-        return -1;
-    }
-
-    public long getTotalBytesWritten() {
-        return -1;
-    }
-
-    public long getTotalBytesSent() {
-        return -1;
-    }
-
-    public long getTotalBytesReceived() {
-        return -1;
-    }
 }

@@ -168,11 +168,9 @@ public class ParquetUtils {
         final ParquetFileWriter.Mode mode = overwrite ? ParquetFileWriter.Mode.OVERWRITE : ParquetFileWriter.Mode.CREATE;
         parquetConfig.setWriterMode(mode);
 
-        if(context.getProperty(ParquetUtils.COMPRESSION_TYPE).isSet()) {
-            final String compressionTypeValue = context.getProperty(ParquetUtils.COMPRESSION_TYPE).getValue();
-            final CompressionCodecName codecName = CompressionCodecName.valueOf(compressionTypeValue);
-            parquetConfig.setCompressionCodec(codecName);
-        }
+        final String compressionTypeValue = context.getProperty(ParquetUtils.COMPRESSION_TYPE).getValue();
+        final CompressionCodecName codecName = CompressionCodecName.valueOf(compressionTypeValue);
+        parquetConfig.setCompressionCodec(codecName);
 
         // Optional properties
 

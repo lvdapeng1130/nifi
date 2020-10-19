@@ -46,16 +46,12 @@ public class SubstringEvaluator extends StringEvaluator {
         if (subjectValue == null) {
             return new StringQueryResult("");
         }
-        try {
-            final int startIndexValue = startIndex.evaluate(evaluationContext).getValue().intValue();
-            if (endIndex == null) {
-                return new StringQueryResult(subjectValue.substring(startIndexValue));
-            } else {
-                final int endIndexValue = endIndex.evaluate(evaluationContext).getValue().intValue();
-                return new StringQueryResult(subjectValue.substring(startIndexValue, endIndexValue));
-            }
-        } catch (IndexOutOfBoundsException e) {
-            return new StringQueryResult("");
+        final int startIndexValue = startIndex.evaluate(evaluationContext).getValue().intValue();
+        if (endIndex == null) {
+            return new StringQueryResult(subjectValue.substring(startIndexValue));
+        } else {
+            final int endIndexValue = endIndex.evaluate(evaluationContext).getValue().intValue();
+            return new StringQueryResult(subjectValue.substring(startIndexValue, endIndexValue));
         }
     }
 

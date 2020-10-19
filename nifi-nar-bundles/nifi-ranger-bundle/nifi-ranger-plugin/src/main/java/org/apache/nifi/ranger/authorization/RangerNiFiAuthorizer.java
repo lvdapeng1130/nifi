@@ -36,7 +36,6 @@ import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.ranger.audit.model.AuthzAuditEvent;
 import org.apache.ranger.authorization.hadoop.config.RangerConfiguration;
-import org.apache.ranger.authorization.hadoop.config.RangerPluginConfig;
 import org.apache.ranger.plugin.audit.RangerDefaultAuditHandler;
 import org.apache.ranger.plugin.policyengine.RangerAccessRequestImpl;
 import org.apache.ranger.plugin.policyengine.RangerAccessResourceImpl;
@@ -91,18 +90,11 @@ public class RangerNiFiAuthorizer implements Authorizer, AuthorizationAuditor {
             if (nifiPlugin == null) {
                 logger.info("RangerNiFiAuthorizer(): initializing base plugin");
 
-                final String serviceType = getConfigValue(configurationContext, RANGER_SERVICE_TYPE_PROP, DEFAULT_SERVICE_TYPE);
-                final String appId = getConfigValue(configurationContext, RANGER_APP_ID_PROP, DEFAULT_APP_ID);
-
-                nifiPlugin = createRangerBasePlugin(serviceType, appId);
-
-                final RangerPluginConfig pluginConfig = nifiPlugin.getConfig();
-
                 final PropertyValue securityConfigValue = configurationContext.getProperty(RANGER_SECURITY_PATH_PROP);
-                addRequiredResource(RANGER_SECURITY_PATH_PROP, securityConfigValue, pluginConfig);
+                addRequiredResource(RANGER_SECURITY_PATH_PROP, securityConfigValue);
 
                 final PropertyValue auditConfigValue = configurationContext.getProperty(RANGER_AUDIT_PATH_PROP);
-                addRequiredResource(RANGER_AUDIT_PATH_PROP, auditConfigValue, pluginConfig);
+                addRequiredResource(RANGER_AUDIT_PATH_PROP, auditConfigValue);
 
                 final String rangerKerberosEnabledValue = getConfigValue(configurationContext, RANGER_KERBEROS_ENABLED_PROP, Boolean.FALSE.toString());
                 rangerKerberosEnabled = rangerKerberosEnabledValue.equals(Boolean.TRUE.toString()) ? true : false;
@@ -125,6 +117,10 @@ public class RangerNiFiAuthorizer implements Authorizer, AuthorizationAuditor {
                     UserGroupInformation.loginUserFromKeytab(nifiPrincipal.trim(), nifiKeytab.trim());
                 }
 
+                final String serviceType = getConfigValue(configurationContext, RANGER_SERVICE_TYPE_PROP, DEFAULT_SERVICE_TYPE);
+                final String appId = getConfigValue(configurationContext, RANGER_APP_ID_PROP, DEFAULT_APP_ID);
+
+                nifiPlugin = createRangerBasePlugin(serviceType, appId);
                 nifiPlugin.init();
 
                 defaultAuditHandler = new RangerDefaultAuditHandler();
@@ -250,9 +246,8 @@ public class RangerNiFiAuthorizer implements Authorizer, AuthorizationAuditor {
      *
      * @param name the name of the given PropertyValue from the AuthorizationConfigurationContext
      * @param resourceValue the value for the given name, should be a full path to a file
-     * @param configuration the RangerConfiguration instance to add the resource to
      */
-    private void addRequiredResource(final String name, final PropertyValue resourceValue, final RangerConfiguration configuration) {
+    private void addRequiredResource(final String name, final PropertyValue resourceValue) {
         if (resourceValue == null || StringUtils.isBlank(resourceValue.getValue())) {
             throw new AuthorizerCreationException(name + " must be specified.");
         }
@@ -263,7 +258,7 @@ public class RangerNiFiAuthorizer implements Authorizer, AuthorizationAuditor {
         }
 
         try {
-            configuration.addResource(resourceFile.toURI().toURL());
+            RangerConfiguration.getInstance().addResource(resourceFile.toURI().toURL());
         } catch (MalformedURLException e) {
             throw new AuthorizerCreationException("Error creating URI for " + resourceValue, e);
         }

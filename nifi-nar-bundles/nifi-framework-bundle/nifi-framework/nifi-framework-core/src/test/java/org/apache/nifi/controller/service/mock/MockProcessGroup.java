@@ -165,11 +165,6 @@ public class MockProcessGroup implements ProcessGroup {
     }
 
     @Override
-    public void enableAllControllerServices() {
-
-    }
-
-    @Override
     public CompletableFuture<Void> startProcessor(final ProcessorNode processor, final boolean failIfStopping) {
         return CompletableFuture.completedFuture(null);
     }

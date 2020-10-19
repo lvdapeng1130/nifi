@@ -21,7 +21,6 @@ import org.apache.nifi.web.api.dto.status.StatusHistoryDTO;
 import org.apache.nifi.web.api.dto.status.StatusSnapshotDTO;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
@@ -76,13 +75,18 @@ public class StatusHistoryUtil {
     }
 
     public static List<StatusDescriptorDTO> createFieldDescriptorDtos(final Collection<MetricDescriptor<?>> metricDescriptors) {
-        final StatusDescriptorDTO[] result = new StatusDescriptorDTO[metricDescriptors.size()];
+        final List<StatusDescriptorDTO> dtos = new ArrayList<>();
 
+        final Set<MetricDescriptor<?>> allDescriptors = new LinkedHashSet<>();
         for (final MetricDescriptor<?> metricDescriptor : metricDescriptors) {
-            result[metricDescriptor.getMetricIdentifier()] = createStatusDescriptorDto(metricDescriptor);
+            allDescriptors.add(metricDescriptor);
         }
 
-        return Arrays.asList(result);
+        for (final MetricDescriptor<?> metricDescriptor : allDescriptors) {
+            dtos.add(createStatusDescriptorDto(metricDescriptor));
+        }
+
+        return dtos;
     }
 
     public static List<StatusDescriptorDTO> createFieldDescriptorDtos(final StatusHistory statusHistory) {

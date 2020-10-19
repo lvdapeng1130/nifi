@@ -29,9 +29,7 @@
     <dependencies>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-jetty-bundle</artifactId>
-            <version>1.13.0-SNAPSHOT</version>
-            <type>nar</type>
+            <artifactId>nifi-jetty</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -52,24 +50,8 @@
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-framework-cluster</artifactId>
-            <version>1.13.0-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-stateless</artifactId>
             <version>1.13.0-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>org.glassfish.jersey.core</groupId>
-            <artifactId>jersey-server</artifactId>
-            <version>${jersey.version}</version>
-        </dependency>
-        <!-- Override scope to compile since framework NAR won't get this from a parent NAR -->
-        <dependency>
-            <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-security-utils-api</artifactId>
-            <scope>compile</scope>
         </dependency>
 
         <!-- mark these nifi artifacts as provided since it is included in the lib -->
@@ -93,6 +75,6 @@
             <artifactId>nifi-properties</artifactId>
             <scope>provided</scope>
         </dependency>
-
+                        
     </dependencies>
 </project>

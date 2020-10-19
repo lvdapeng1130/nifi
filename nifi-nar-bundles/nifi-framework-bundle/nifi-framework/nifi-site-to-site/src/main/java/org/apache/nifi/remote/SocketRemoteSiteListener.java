@@ -47,7 +47,6 @@ import org.apache.nifi.remote.protocol.CommunicationsSession;
 import org.apache.nifi.remote.protocol.RequestType;
 import org.apache.nifi.remote.protocol.ServerProtocol;
 import org.apache.nifi.security.util.CertificateUtils;
-import org.apache.nifi.security.util.TlsConfiguration;
 import org.apache.nifi.util.NiFiProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +60,7 @@ public class SocketRemoteSiteListener implements RemoteSiteListener {
     private final NiFiProperties nifiProperties;
     private final PeerDescriptionModifier peerDescriptionModifier;
 
-    private static final int EXCEPTION_THRESHOLD_MILLIS = 10_000;
+    private static int EXCEPTION_THRESHOLD_MILLIS = 10_000;
     private volatile long tlsErrorLastSeen = -1;
 
     private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -347,7 +346,7 @@ public class SocketRemoteSiteListener implements RemoteSiteListener {
             final SSLServerSocket serverSocket = (SSLServerSocket) sslContext.getServerSocketFactory().createServerSocket(socketPort);
             serverSocket.setNeedClientAuth(true);
             // Enforce custom protocols on socket
-            serverSocket.setEnabledProtocols(TlsConfiguration.getCurrentSupportedTlsProtocolVersions());
+            serverSocket.setEnabledProtocols(CertificateUtils.getCurrentSupportedTlsProtocolVersions());
             return serverSocket;
         } else {
             return new ServerSocket(socketPort);

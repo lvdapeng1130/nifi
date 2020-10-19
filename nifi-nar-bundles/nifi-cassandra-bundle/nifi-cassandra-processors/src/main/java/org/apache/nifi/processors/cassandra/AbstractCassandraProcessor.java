@@ -52,7 +52,7 @@ import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
-import org.apache.nifi.security.util.ClientAuth;
+import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.ssl.SSLContextService;
 
 /**
@@ -107,7 +107,7 @@ public abstract class AbstractCassandraProcessor extends AbstractProcessor {
                     + "Possible values are REQUIRED, WANT, NONE. This property is only used when an SSL Context "
                     + "has been defined and enabled.")
             .required(false)
-            .allowableValues(ClientAuth.values())
+            .allowableValues(SslContextFactory.ClientAuth.values())
             .defaultValue("REQUIRED")
             .build();
 
@@ -256,16 +256,16 @@ public abstract class AbstractCassandraProcessor extends AbstractProcessor {
             final SSLContext sslContext;
 
             if (sslService != null) {
-                final ClientAuth clientAuth;
+                final SslContextFactory.ClientAuth clientAuth;
 
                 if (StringUtils.isBlank(rawClientAuth)) {
-                    clientAuth = ClientAuth.REQUIRED;
+                    clientAuth = SslContextFactory.ClientAuth.REQUIRED;
                 } else {
                     try {
-                        clientAuth = ClientAuth.valueOf(rawClientAuth);
+                        clientAuth = SslContextFactory.ClientAuth.valueOf(rawClientAuth);
                     } catch (final IllegalArgumentException iae) {
                         throw new IllegalStateException(String.format("Unrecognized client auth '%s'. Possible values are [%s]",
-                                rawClientAuth, StringUtils.join(ClientAuth.values(), ", ")));
+                                rawClientAuth, StringUtils.join(SslContextFactory.ClientAuth.values(), ", ")));
                     }
                 }
 

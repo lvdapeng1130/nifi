@@ -27,11 +27,9 @@
                 'nf.ClusterSummary',
                 'nf.ErrorHandler',
                 'nf.Settings',
-                'nf.ParameterContexts',
-                'nf.ProcessGroup',
-                'nf.ProcessGroupConfiguration'],
-            function ($, nfCommon, nfDialog, nfCanvasUtils, nfContextMenu, nfClusterSummary, nfErrorHandler, nfSettings, nfParameterContexts, nfProcessGroup, nfProcessGroupConfiguration) {
-                return (nf.ng.Canvas.FlowStatusCtrl = factory($, nfCommon, nfDialog, nfCanvasUtils, nfContextMenu, nfClusterSummary, nfErrorHandler, nfSettings, nfParameterContexts, nfProcessGroup, nfProcessGroupConfiguration));
+                'nf.ParameterContexts'],
+            function ($, nfCommon, nfDialog, nfCanvasUtils, nfContextMenu, nfClusterSummary, nfErrorHandler, nfSettings, nfParameterContexts) {
+                return (nf.ng.Canvas.FlowStatusCtrl = factory($, nfCommon, nfDialog, nfCanvasUtils, nfContextMenu, nfClusterSummary, nfErrorHandler, nfSettings, nfParameterContexts));
             });
     } else if (typeof exports === 'object' && typeof module === 'object') {
         module.exports = (nf.ng.Canvas.FlowStatusCtrl =
@@ -43,9 +41,7 @@
                 require('nf.ClusterSummary'),
                 require('nf.ErrorHandler'),
                 require('nf.Settings'),
-                require('nf.ParameterContexts'),
-                require('nf.ProcessGroup'),
-                require('nf.ProcessGroupConfiguration')));
+                require('nf.ParameterContexts')));
     } else {
         nf.ng.Canvas.FlowStatusCtrl = factory(root.$,
             root.nf.Common,
@@ -55,11 +51,9 @@
             root.nf.ClusterSummary,
             root.nf.ErrorHandler,
             root.nf.Settings,
-            root.nf.ParameterContexts,
-            root.nf.ProcessGroup,
-            root.nf.ProcessGroupConfiguration);
+            root.nf.ParameterContexts);
     }
-}(this, function ($, nfCommon, nfDialog, nfCanvasUtils, nfContextMenu, nfClusterSummary, nfErrorHandler, nfSettings, nfParameterContexts, nfProcessGroup, nfProcessGroupConfiguration) {
+}(this, function ($, nfCommon, nfDialog, nfCanvasUtils, nfContextMenu, nfClusterSummary, nfErrorHandler, nfSettings, nfParameterContexts) {
     'use strict';
 
     return function (serviceProvider) {
@@ -316,14 +310,6 @@
                                 case 'parameter':
                                     var paramContext = item.parentGroup;
                                     nfParameterContexts.showParameterContext(paramContext.id, null, item.name);
-                                    break;
-                                case 'controller service':
-                                    var group = item.parentGroup;
-                                    nfProcessGroup.enterGroup(group.id).done(function () {
-                                        nfProcessGroupConfiguration.showConfiguration(group.id).done(function () {
-                                            nfProcessGroupConfiguration.selectControllerService(item.id);
-                                        });
-                                    });
                                     break;
                                 default:
                                     var group = item.parentGroup;

@@ -26,7 +26,6 @@ import org.apache.nifi.annotation.lifecycle.OnShutdown;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.controller.AbstractControllerService;
 import org.apache.nifi.controller.ConfigurationContext;
-import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.record.sink.RecordSinkService;
 import org.apache.nifi.reporting.ReportingContext;
 import org.apache.nifi.prometheus.util.PrometheusMetricsUtil;
@@ -121,8 +120,7 @@ public class PrometheusRecordSink extends AbstractControllerService implements R
             prometheusServer.setMetricsCollectors(metricsCollectors);
             getLogger().info("Started JETTY server");
         } catch (Exception e) {
-            // Don't allow this to finish successfully, onTrigger should not be called if the Jetty server wasn't started
-            throw new ProcessException("Failed to start Jetty server", e);
+            getLogger().error("Failed to start Jetty server", e);
         }
     }
 
@@ -183,23 +181,15 @@ public class PrometheusRecordSink extends AbstractControllerService implements R
 
     @OnDisabled
     public void onStopped() throws Exception {
-        if (prometheusServer != null) {
-            Server server = prometheusServer.getServer();
-            if (server != null) {
-                server.stop();
-            }
-        }
+        Server server = prometheusServer.getServer();
+        server.stop();
         recordSchema = null;
     }
 
     @OnShutdown
     public void onShutDown() throws Exception {
-        if (prometheusServer != null) {
-            Server server = prometheusServer.getServer();
-            if (server != null) {
-                server.stop();
-            }
-        }
+        Server server = prometheusServer.getServer();
+        server.stop();
         recordSchema = null;
     }
 

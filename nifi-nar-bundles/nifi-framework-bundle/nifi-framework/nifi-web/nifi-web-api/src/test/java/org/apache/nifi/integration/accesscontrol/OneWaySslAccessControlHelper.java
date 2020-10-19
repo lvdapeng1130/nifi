@@ -31,7 +31,6 @@ import org.apache.nifi.nar.NarUnpacker;
 import org.apache.nifi.nar.StandardExtensionDiscoveringManager;
 import org.apache.nifi.nar.SystemBundle;
 import org.apache.nifi.security.util.SslContextFactory;
-import org.apache.nifi.security.util.StandardTlsConfiguration;
 import org.apache.nifi.security.util.TlsConfiguration;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.web.util.WebUtils;
@@ -41,13 +40,13 @@ import org.apache.nifi.web.util.WebUtils;
  */
 public class OneWaySslAccessControlHelper {
 
-    private final NiFiTestUser user;
+    private NiFiTestUser user;
 
     private static final String CONTEXT_PATH = "/nifi-api";
 
     private NiFiTestServer server;
-    private final String baseUrl;
-    private final String flowXmlPath;
+    private String baseUrl;
+    private String flowXmlPath;
 
     public OneWaySslAccessControlHelper() throws Exception {
         this("src/test/resources/access-control/nifi.properties");
@@ -91,7 +90,7 @@ public class OneWaySslAccessControlHelper {
         baseUrl = server.getBaseUrl() + CONTEXT_PATH;
 
         // Create a TlsConfiguration for the truststore properties only
-        TlsConfiguration trustOnlyTlsConfiguration = StandardTlsConfiguration.fromNiFiPropertiesTruststoreOnly(props);
+        TlsConfiguration trustOnlyTlsConfiguration = TlsConfiguration.fromNiFiPropertiesTruststoreOnly(props);
 
         // create the user
         final Client client = WebUtils.createClient(null, SslContextFactory.createSslContext(trustOnlyTlsConfiguration));

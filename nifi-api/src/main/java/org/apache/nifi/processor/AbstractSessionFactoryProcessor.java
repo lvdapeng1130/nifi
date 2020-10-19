@@ -18,6 +18,7 @@ package org.apache.nifi.processor;
 
 import java.util.Collections;
 import java.util.Set;
+
 import org.apache.nifi.annotation.lifecycle.OnConfigurationRestored;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.annotation.lifecycle.OnUnscheduled;

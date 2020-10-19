@@ -108,7 +108,6 @@ import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
-import org.apache.nifi.flowfile.attributes.StandardFlowFileMediaType;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.AbstractProcessor;
 import org.apache.nifi.processor.DataUnit;
@@ -149,6 +148,9 @@ public class PostHTTP extends AbstractProcessor {
     public static final String CONTENT_TYPE_HEADER = "Content-Type";
     public static final String ACCEPT = "Accept";
     public static final String ACCEPT_ENCODING = "Accept-Encoding";
+    public static final String APPLICATION_FLOW_FILE_V1 = "application/flowfile";
+    public static final String APPLICATION_FLOW_FILE_V2 = "application/flowfile-v2";
+    public static final String APPLICATION_FLOW_FILE_V3 = "application/flowfile-v3";
     public static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
     public static final String FLOWFILE_CONFIRMATION_HEADER = "x-prefer-acknowledge-uri";
     public static final String LOCATION_HEADER_NAME = "Location";
@@ -162,8 +164,6 @@ public class PostHTTP extends AbstractProcessor {
     public static final String TRANSACTION_ID_HEADER = "x-nifi-transaction-id";
     public static final String PROTOCOL_VERSION = "3";
     public static final String REMOTE_DN = "remote.dn";
-
-    private static final String FLOW_FILE_CONNECTION_LOG = "Connection to URI {} will be using Content Type {} if sending data as FlowFile";
 
     public static final PropertyDescriptor URL = new PropertyDescriptor.Builder()
             .name("URL")
@@ -709,11 +709,11 @@ public class PostHTTP extends AbstractProcessor {
         final String contentType;
         if (sendAsFlowFile) {
             if (accepts.isFlowFileV3Accepted()) {
-                contentType = StandardFlowFileMediaType.VERSION_3.getMediaType();
+                contentType = APPLICATION_FLOW_FILE_V3;
             } else if (accepts.isFlowFileV2Accepted()) {
-                contentType = StandardFlowFileMediaType.VERSION_2.getMediaType();
+                contentType = APPLICATION_FLOW_FILE_V2;
             } else if (accepts.isFlowFileV1Accepted()) {
-                contentType = StandardFlowFileMediaType.VERSION_1.getMediaType();
+                contentType = APPLICATION_FLOW_FILE_V1;
             } else {
                 logger.error("Cannot send {} to {} because the destination does not accept FlowFiles and this processor is "
                         + "configured to deliver FlowFiles; routing to failure",
@@ -942,9 +942,9 @@ public class PostHTTP extends AbstractProcessor {
                     for (final Header header : headers) {
                         for (final String accepted : header.getValue().split(",")) {
                             final String trimmed = accepted.trim();
-                            if (trimmed.equals(StandardFlowFileMediaType.VERSION_3.getMediaType())) {
+                            if (trimmed.equals(APPLICATION_FLOW_FILE_V3)) {
                                 acceptsFlowFileV3 = true;
-                            } else if (trimmed.equals(StandardFlowFileMediaType.VERSION_2.getMediaType())) {
+                            } else if (trimmed.equals(APPLICATION_FLOW_FILE_V2)) {
                                 acceptsFlowFileV2 = true;
                             }
                         }
@@ -962,11 +962,11 @@ public class PostHTTP extends AbstractProcessor {
 
                 if (getLogger().isDebugEnabled()) {
                     if (acceptsFlowFileV3) {
-                        getLogger().debug(FLOW_FILE_CONNECTION_LOG, new Object[]{uri, StandardFlowFileMediaType.VERSION_3.getMediaType()});
+                        getLogger().debug("Connection to URI " + uri + " will be using Content Type " + APPLICATION_FLOW_FILE_V3 + " if sending data as FlowFile");
                     } else if (acceptsFlowFileV2) {
-                        getLogger().debug(FLOW_FILE_CONNECTION_LOG, new Object[]{uri, StandardFlowFileMediaType.VERSION_2.getMediaType()});
+                        getLogger().debug("Connection to URI " + uri + " will be using Content Type " + APPLICATION_FLOW_FILE_V2 + " if sending data as FlowFile");
                     } else if (acceptsFlowFileV1) {
-                        getLogger().debug(FLOW_FILE_CONNECTION_LOG, new Object[]{uri, StandardFlowFileMediaType.VERSION_1.getMediaType()});
+                        getLogger().debug("Connection to URI " + uri + " will be using Content Type " + APPLICATION_FLOW_FILE_V1 + " if sending data as FlowFile");
                     }
                 }
             }

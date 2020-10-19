@@ -29,6 +29,7 @@ import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.security.util.TlsConfiguration;
 
 /**
@@ -40,42 +41,10 @@ import org.apache.nifi.security.util.TlsConfiguration;
         + "that configuration throughout the application")
 public interface SSLContextService extends ControllerService {
 
+    // May need to back out if NAR-specific API can't be modified in minor release
     TlsConfiguration createTlsConfiguration();
 
-    /**
-     * This enum was removed in 1.12.0 but external custom code has been compiled against it, so it is returned
-     * in 1.12.1. This enum should no longer be used and any dependent code should now reference
-     * ClientAuth moving forward. This enum may be removed in a future release.
-     *
-     */
-    @Deprecated
-    enum ClientAuth {
-        WANT,
-        REQUIRED,
-        NONE
-    }
-
-    /**
-     * Returns a configured {@link SSLContext} from the populated configuration values. This method is preferred
-     * over the overloaded method which accepts the deprecated {@link ClientAuth} enum.
-     *
-     * @param clientAuth the desired level of client authentication
-     * @return the configured SSLContext
-     * @throws ProcessException if there is a problem configuring the context
-     */
-    SSLContext createSSLContext(final org.apache.nifi.security.util.ClientAuth clientAuth) throws ProcessException;
-
-    /**
-     * Returns a configured {@link SSLContext} from the populated configuration values. This method is deprecated
-     * due to the use of the deprecated {@link ClientAuth} enum and the overloaded method
-     * ({@link #createSSLContext(org.apache.nifi.security.util.ClientAuth)}) is preferred.
-     *
-     * @param clientAuth the desired level of client authentication
-     * @return the configured SSLContext
-     * @throws ProcessException if there is a problem configuring the context
-     */
-    @Deprecated
-    SSLContext createSSLContext(final ClientAuth clientAuth) throws ProcessException;
+    SSLContext createSSLContext(final SslContextFactory.ClientAuth clientAuth) throws ProcessException;
 
     String getTrustStoreFile();
 
@@ -121,27 +90,16 @@ public interface SSLContextService extends ControllerService {
             // ignored as default is used
         }
 
-        return formAllowableValues(supportedProtocols);
-    }
-
-    /**
-     * Returns an array of {@link AllowableValue} objects formed from the provided
-     * set of Strings. The returned array is sorted for consistency in display order.
-     *
-     * @param rawValues the set of string values
-     * @return an array of AllowableValues
-     */
-    static AllowableValue[] formAllowableValues(Set<String> rawValues) {
-        final int numProtocols = rawValues.size();
+        final int numProtocols = supportedProtocols.size();
 
         // Sort for consistent presentation in configuration views
-        final List<String> valueList = new ArrayList<>(rawValues);
-        Collections.sort(valueList);
+        final List<String> supportedProtocolList = new ArrayList<>(supportedProtocols);
+        Collections.sort(supportedProtocolList);
 
-        final List<AllowableValue> allowableValues = new ArrayList<>();
-        for (final String protocol : valueList) {
-            allowableValues.add(new AllowableValue(protocol));
+        final List<AllowableValue> protocolAllowableValues = new ArrayList<>();
+        for (final String protocol : supportedProtocolList) {
+            protocolAllowableValues.add(new AllowableValue(protocol));
         }
-        return allowableValues.toArray(new AllowableValue[numProtocols]);
+        return protocolAllowableValues.toArray(new AllowableValue[numProtocols]);
     }
 }

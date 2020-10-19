@@ -299,6 +299,7 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
             if (colIdx != -1) {
                 ColumnSchema colSchema = schema.getColumnByIndex(colIdx);
                 Type colType = colSchema.getType();
+
                 if (record.getValue(recordFieldName) == null) {
                     if (schema.getColumnByIndex(colIdx).isKey()) {
                         throw new IllegalArgumentException(String.format("Can't set primary key column %s to null ", colName));
@@ -351,9 +352,6 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
                         case VARCHAR:
                             row.addVarchar(colIdx, DataTypeUtils.toString(value, recordFieldName));
                             break;
-                        case DATE:
-                            row.addDate(colIdx, DataTypeUtils.toDate(value, () -> DataTypeUtils.getDateFormat(RecordFieldType.DATE.getDefaultFormat()), recordFieldName));
-                            break;
                         default:
                             throw new IllegalStateException(String.format("unknown column type %s", colType));
                     }
@@ -388,8 +386,6 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
             case CHAR:
             case STRING:
                 return Type.STRING;
-            case DATE:
-                return Type.DATE;
             default:
                 throw new IllegalArgumentException(String.format("unsupported type %s", nifiType));
         }

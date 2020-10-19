@@ -16,7 +16,6 @@
  */
 package org.apache.nifi.web.filter;
 
-import java.io.IOException;
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -25,6 +24,7 @@ import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
 
 /**
  * Filter for determining appropriate logout location.
@@ -50,7 +50,7 @@ public class LogoutFilter implements Filter {
             final ServletContext apiContext = servletContext.getContext("/nifi-api");
             apiContext.getRequestDispatcher("/access/knox/logout").forward(request, response);
         } else {
-            ((HttpServletResponse) response).sendRedirect("logout-complete");
+            ((HttpServletResponse) response).sendRedirect("login");
         }
     }
 

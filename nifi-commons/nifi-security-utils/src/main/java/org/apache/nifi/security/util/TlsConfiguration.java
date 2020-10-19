@@ -19,21 +19,19 @@ package org.apache.nifi.security.util;
 import java.io.File;
 import java.net.MalformedURLException;
 import java.util.Objects;
+import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 /**
- * This class serves as a concrete immutable domain object (acting as an internal DTO)
- * for the various keystore and truststore configuration settings necessary for
- * building {@link javax.net.ssl.SSLContext}s.
+ * This class serves as an immutable domain object (acting as an internal DTO) for the various keystore and truststore configuration settings necessary for building {@link javax.net.ssl.SSLContext}s.
  */
-public class StandardTlsConfiguration implements TlsConfiguration {
-    private static final Logger logger = LoggerFactory.getLogger(StandardTlsConfiguration.class);
+public class TlsConfiguration {
+    private static final Logger logger = LoggerFactory.getLogger(TlsConfiguration.class);
 
-    private static final String TLS_PROTOCOL_VERSION = TlsConfiguration.getHighestCurrentSupportedTlsProtocolVersion();
+    private static final String TLS_PROTOCOL_VERSION = CertificateUtils.getHighestCurrentSupportedTlsProtocolVersion();
     private static final String MASKED_PASSWORD_LOG = "********";
     private static final String NULL_LOG = "null";
 
@@ -51,7 +49,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
     /**
      * Default constructor present for testing and completeness.
      */
-    public StandardTlsConfiguration() {
+    public TlsConfiguration() {
         this(null, null, null, "", null, null, "", null);
     }
 
@@ -65,7 +63,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      * @param truststorePassword the truststore password
      * @param truststoreType     the truststore type
      */
-    public StandardTlsConfiguration(String keystorePath, String keystorePassword, KeystoreType keystoreType, String truststorePath, String truststorePassword, KeystoreType truststoreType) {
+    public TlsConfiguration(String keystorePath, String keystorePassword, KeystoreType keystoreType, String truststorePath, String truststorePassword, KeystoreType truststoreType) {
         this(keystorePath, keystorePassword, keystorePassword, keystoreType, truststorePath, truststorePassword, truststoreType, TLS_PROTOCOL_VERSION);
     }
 
@@ -80,7 +78,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      * @param truststorePassword the truststore password
      * @param truststoreType     the truststore type
      */
-    public StandardTlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
+    public TlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
                             KeystoreType keystoreType, String truststorePath, String truststorePassword, KeystoreType truststoreType) {
         this(keystorePath, keystorePassword, keyPassword, keystoreType, truststorePath, truststorePassword, truststoreType, TLS_PROTOCOL_VERSION);
     }
@@ -96,7 +94,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      * @param truststorePassword the truststore password
      * @param truststoreType     the truststore type as a String
      */
-    public StandardTlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
+    public TlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
                             String keystoreType, String truststorePath, String truststorePassword, String truststoreType) {
         this(keystorePath, keystorePassword, keyPassword,
                 (KeystoreType.isValidKeystoreType(keystoreType) ? KeystoreType.valueOf(keystoreType.toUpperCase()) : null),
@@ -117,7 +115,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      * @param truststoreType     the truststore type as a String
      * @param protocol           the TLS protocol version string
      */
-    public StandardTlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
+    public TlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
                             String keystoreType, String truststorePath, String truststorePassword, String truststoreType, String protocol) {
         this(keystorePath, keystorePassword, keyPassword,
                 (KeystoreType.isValidKeystoreType(keystoreType) ? KeystoreType.valueOf(keystoreType.toUpperCase()) : null),
@@ -138,7 +136,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      * @param truststoreType     the truststore type
      * @param protocol           the TLS protocol version string
      */
-    public StandardTlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
+    public TlsConfiguration(String keystorePath, String keystorePassword, String keyPassword,
                             KeystoreType keystoreType, String truststorePath, String truststorePassword, KeystoreType truststoreType, String protocol) {
         this.keystorePath = keystorePath;
         this.keystorePassword = keystorePassword;
@@ -155,26 +153,26 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @param other the configuration to copy
      */
-    public StandardTlsConfiguration(TlsConfiguration other) {
-        this.keystorePath = other.getKeystorePath();
-        this.keystorePassword = other.getKeystorePassword();
-        this.keyPassword = other.getKeyPassword();
-        this.keystoreType = other.getKeystoreType();
-        this.truststorePath = other.getTruststorePath();
-        this.truststorePassword = other.getTruststorePassword();
-        this.truststoreType = other.getTruststoreType();
-        this.protocol = other.getProtocol();
+    public TlsConfiguration(TlsConfiguration other) {
+        this.keystorePath = other.keystorePath;
+        this.keystorePassword = other.keystorePassword;
+        this.keyPassword = other.keyPassword;
+        this.keystoreType = other.keystoreType;
+        this.truststorePath = other.truststorePath;
+        this.truststorePassword = other.truststorePassword;
+        this.truststoreType = other.truststoreType;
+        this.protocol = other.protocol;
     }
 
     // Static factory method from NiFiProperties
 
     /**
-     * Returns a {@link org.apache.nifi.security.util.TlsConfiguration} instantiated from the relevant {@link NiFiProperties} properties.
+     * Returns a {@link TlsConfiguration} instantiated from the relevant {@link NiFiProperties} properties.
      *
      * @param niFiProperties the NiFi properties
      * @return a populated TlsConfiguration container object
      */
-    public static StandardTlsConfiguration fromNiFiProperties(NiFiProperties niFiProperties) {
+    public static TlsConfiguration fromNiFiProperties(NiFiProperties niFiProperties) {
         if (niFiProperties == null) {
             throw new IllegalArgumentException("The NiFi properties cannot be null");
         }
@@ -188,7 +186,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
         String truststoreType = niFiProperties.getProperty(NiFiProperties.SECURITY_TRUSTSTORE_TYPE);
         String protocol = TLS_PROTOCOL_VERSION;
 
-        final StandardTlsConfiguration tlsConfiguration = new StandardTlsConfiguration(keystorePath, keystorePassword, keyPassword,
+        final TlsConfiguration tlsConfiguration = new TlsConfiguration(keystorePath, keystorePassword, keyPassword,
                 keystoreType, truststorePath, truststorePassword,
                 truststoreType, protocol);
         if (logger.isDebugEnabled()) {
@@ -201,14 +199,12 @@ public class StandardTlsConfiguration implements TlsConfiguration {
     }
 
     /**
-     * Returns a {@link org.apache.nifi.security.util.TlsConfiguration} instantiated
-     * from the relevant {@link NiFiProperties} properties for the truststore
-     * <em>only</em>. No keystore properties are read or used.
+     * Returns a {@link TlsConfiguration} instantiated from the relevant {@link NiFiProperties} properties for the truststore <em>only</em>. No keystore properties are read or used.
      *
      * @param niFiProperties the NiFi properties
      * @return a populated TlsConfiguration container object
      */
-    public static StandardTlsConfiguration fromNiFiPropertiesTruststoreOnly(NiFiProperties niFiProperties) {
+    public static TlsConfiguration fromNiFiPropertiesTruststoreOnly(NiFiProperties niFiProperties) {
         if (niFiProperties == null) {
             throw new IllegalArgumentException("The NiFi properties cannot be null");
         }
@@ -218,7 +214,7 @@ public class StandardTlsConfiguration implements TlsConfiguration {
         String truststoreType = niFiProperties.getProperty(NiFiProperties.SECURITY_TRUSTSTORE_TYPE);
         String protocol = TLS_PROTOCOL_VERSION;
 
-        final StandardTlsConfiguration tlsConfiguration = new StandardTlsConfiguration(null, null, null, null, truststorePath, truststorePassword,
+        final TlsConfiguration tlsConfiguration = new TlsConfiguration(null, null, null, null, truststorePath, truststorePassword,
                 truststoreType, protocol);
         if (logger.isDebugEnabled()) {
             logger.debug("Instantiating TlsConfiguration from NiFi properties: null x4, {}, {}, {}, {}",
@@ -228,25 +224,23 @@ public class StandardTlsConfiguration implements TlsConfiguration {
         return tlsConfiguration;
     }
 
-    // /**
-    //  * Returns {@code true} if the provided TlsConfiguration is {@code null} or <em>empty</em>
-    //  * (i.e. neither any of the keystore nor truststore properties are populated).
-    //  *
-    //  * @param tlsConfiguration the container object to check
-    //  * @return true if this container is empty or null
-    //  */
-    // public static boolean isEmpty(org.apache.nifi.security.util.TlsConfiguration tlsConfiguration) {
-    //     return tlsConfiguration == null || !(tlsConfiguration.isAnyKeystorePopulated() || tlsConfiguration.isAnyTruststorePopulated());
-    // }
+    /**
+     * Returns {@code true} if the provided TlsConfiguration is {@code null} or <em>empty</em>
+     * (i.e. neither any of the keystore nor truststore properties are populated).
+     *
+     * @param tlsConfiguration the container object to check
+     * @return true if this container is empty or null
+     */
+    public static boolean isEmpty(TlsConfiguration tlsConfiguration) {
+        return tlsConfiguration == null || !(tlsConfiguration.isAnyKeystorePopulated() || tlsConfiguration.isAnyTruststorePopulated());
+    }
 
     // Getters & setters
 
-    @Override
     public String getKeystorePath() {
         return keystorePath;
     }
 
-    @Override
     public String getKeystorePassword() {
         return keystorePassword;
     }
@@ -256,12 +250,10 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return a loggable String representation of the keystore password
      */
-    @Override
     public String getKeystorePasswordForLogging() {
         return maskPasswordForLog(keystorePassword);
     }
 
-    @Override
     public String getKeyPassword() {
         return keyPassword;
     }
@@ -271,7 +263,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return a loggable String representation of the key password
      */
-    @Override
     public String getKeyPasswordForLogging() {
         return maskPasswordForLog(keyPassword);
     }
@@ -281,7 +272,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return the key or keystore password actually populated
      */
-    @Override
     public String getFunctionalKeyPassword() {
         return StringUtils.isNotBlank(keyPassword) ? keyPassword : keystorePassword;
     }
@@ -291,22 +281,18 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return a loggable String representation of the functional key password
      */
-    @Override
     public String getFunctionalKeyPasswordForLogging() {
         return maskPasswordForLog(getFunctionalKeyPassword());
     }
 
-    @Override
     public KeystoreType getKeystoreType() {
         return keystoreType;
     }
 
-    @Override
     public String getTruststorePath() {
         return truststorePath;
     }
 
-    @Override
     public String getTruststorePassword() {
         return truststorePassword;
     }
@@ -316,17 +302,14 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return a loggable String representation of the truststore password
      */
-    @Override
     public String getTruststorePasswordForLogging() {
         return maskPasswordForLog(truststorePassword);
     }
 
-    @Override
     public KeystoreType getTruststoreType() {
         return truststoreType;
     }
 
-    @Override
     public String getProtocol() {
         return protocol;
     }
@@ -338,7 +321,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return true if the path, password, and type are present
      */
-    @Override
     public boolean isKeystorePopulated() {
         return isStorePopulated(keystorePath, keystorePassword, keystoreType, "keystore");
     }
@@ -348,7 +330,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return true if any keystore properties are present
      */
-    @Override
     public boolean isAnyKeystorePopulated() {
         return isAnyPopulated(keystorePath, keystorePassword, keystoreType);
     }
@@ -358,7 +339,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return true if the keystore properties are valid
      */
-    @Override
     public boolean isKeystoreValid() {
         boolean simpleCheck = isStoreValid(keystorePath, keystorePassword, keystoreType, "keystore");
         if (simpleCheck) {
@@ -383,7 +363,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return true if the path, password, and type are present
      */
-    @Override
     public boolean isTruststorePopulated() {
         return isStorePopulated(truststorePath, truststorePassword, truststoreType, "truststore");
     }
@@ -393,7 +372,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return true if any truststore properties are present
      */
-    @Override
     public boolean isAnyTruststorePopulated() {
         return isAnyPopulated(truststorePath, truststorePassword, truststoreType);
     }
@@ -403,7 +381,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return true if the truststore properties are valid
      */
-    @Override
     public boolean isTruststoreValid() {
         return isStoreValid(truststorePath, truststorePassword, truststoreType, "truststore");
     }
@@ -415,7 +392,6 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return a loggable String[]
      */
-    @Override
     public String[] getKeystorePropertiesForLogging() {
         return new String[]{getKeystorePath(), getKeystorePasswordForLogging(), getFunctionalKeyPasswordForLogging(), getKeystoreType() != null ? getKeystoreType().getType() : NULL_LOG};
     }
@@ -427,38 +403,37 @@ public class StandardTlsConfiguration implements TlsConfiguration {
      *
      * @return a loggable String[]
      */
-    @Override
     public String[] getTruststorePropertiesForLogging() {
         return new String[]{getTruststorePath(), getTruststorePasswordForLogging(), getKeystoreType() != null ? getTruststoreType().getType() : NULL_LOG};
     }
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("[TlsConfiguration]");
-        sb.append("keystorePath=").append(keystorePath);
-        sb.append(",keystorePassword=").append(getKeystorePasswordForLogging());
-        sb.append(",keyPassword=").append(getKeyPasswordForLogging());
-        sb.append(",keystoreType=").append(keystoreType);
-        sb.append(",truststorePath=").append(truststorePath);
-        sb.append(",truststorePassword=").append(getTruststorePasswordForLogging());
-        sb.append(",truststoreType=").append(truststoreType);
-        sb.append(",protocol=").append(protocol);
-        return sb.toString();
+        return new ToStringBuilder(this)
+                .append("keystorePath", keystorePath)
+                .append("keystorePassword", getKeystorePasswordForLogging())
+                .append("keyPassword", getKeyPasswordForLogging())
+                .append("keystoreType", keystoreType)
+                .append("truststorePath", truststorePath)
+                .append("truststorePassword", getTruststorePasswordForLogging())
+                .append("truststoreType", truststoreType)
+                .append("protocol", protocol)
+                .toString();
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        org.apache.nifi.security.util.TlsConfiguration that = (org.apache.nifi.security.util.TlsConfiguration) o;
-        return Objects.equals(keystorePath, that.getKeystorePath())
-                && Objects.equals(keystorePassword, that.getKeystorePassword())
-                && Objects.equals(keyPassword, that.getKeyPassword())
-                && keystoreType == that.getKeystoreType()
-                && Objects.equals(truststorePath, that.getTruststorePath())
-                && Objects.equals(truststorePassword, that.getTruststorePassword())
-                && truststoreType == that.getTruststoreType()
-                && Objects.equals(protocol, that.getProtocol());
+        TlsConfiguration that = (TlsConfiguration) o;
+        return Objects.equals(keystorePath, that.keystorePath)
+                && Objects.equals(keystorePassword, that.keystorePassword)
+                && Objects.equals(keyPassword, that.keyPassword)
+                && keystoreType == that.keystoreType
+                && Objects.equals(truststorePath, that.truststorePath)
+                && Objects.equals(truststorePassword, that.truststorePassword)
+                && truststoreType == that.truststoreType
+                && Objects.equals(protocol, that.protocol);
     }
 
     @Override

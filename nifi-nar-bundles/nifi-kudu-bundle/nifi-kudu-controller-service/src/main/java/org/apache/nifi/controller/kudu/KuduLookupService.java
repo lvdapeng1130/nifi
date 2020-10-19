@@ -333,9 +333,6 @@ public class KuduLookupService extends AbstractControllerService implements Reco
                 case FLOAT:
                     fields.add(new RecordField(cs.getName(), RecordFieldType.FLOAT.getDataType()));
                     break;
-                case DATE:
-                    fields.add(new RecordField(cs.getName(), RecordFieldType.DATE.getDataType()));
-                    break;
             }
         }
         return new SimpleRecordSchema(fields);
