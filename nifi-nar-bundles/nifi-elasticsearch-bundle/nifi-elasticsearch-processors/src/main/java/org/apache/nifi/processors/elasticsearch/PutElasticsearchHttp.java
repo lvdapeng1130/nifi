@@ -357,7 +357,6 @@ public class PutElasticsearchHttp extends AbstractElasticsearchHttpProcessor {
                                                     new Object[]{flowFile, errorReason});
                                         }
                                         flowFile = session.penalize(flowFile);
-                                        flowFile = session.putAttribute(flowFile, "reason", errorReason);
                                         session.transfer(flowFile, REL_FAILURE);
 
                                     } else {

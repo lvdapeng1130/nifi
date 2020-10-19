@@ -20,6 +20,7 @@ package org.apache.nifi.util;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+
 import org.apache.nifi.registry.VariableDescriptor;
 import org.apache.nifi.registry.VariableRegistry;
 

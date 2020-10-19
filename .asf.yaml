@@ -19,7 +19,6 @@ github:
   labels:
     - nifi
     - java
-    - hacktoberfest
   features:
     wiki: false
     issues: false

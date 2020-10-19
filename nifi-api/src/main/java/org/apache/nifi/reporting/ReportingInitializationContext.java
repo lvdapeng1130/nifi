@@ -17,6 +17,7 @@
 package org.apache.nifi.reporting;
 
 import java.util.concurrent.TimeUnit;
+
 import org.apache.nifi.controller.ControllerServiceLookup;
 import org.apache.nifi.controller.NodeTypeProvider;
 import org.apache.nifi.kerberos.KerberosContext;

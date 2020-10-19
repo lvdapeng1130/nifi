@@ -38,7 +38,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
 import org.apache.commons.net.ftp.FTPHTTPClient;
@@ -547,8 +546,19 @@ public class FTPTransfer implements FileTransfer {
         }
     }
 
-    @VisibleForTesting
-    protected FTPClient createFTPClient() {
+    private FTPClient getClient(final FlowFile flowFile) throws IOException {
+        if (client != null) {
+            String desthost = ctx.getProperty(HOSTNAME).evaluateAttributeExpressions(flowFile).getValue();
+            if (remoteHostName.equals(desthost)) {
+                // destination matches so we can keep our current session
+                resetWorkingDirectory();
+                return client;
+            } else {
+                // this flowFile is going to a different destination, reset session
+                close();
+            }
+        }
+
         final ProxyConfiguration proxyConfig = ProxyConfiguration.getConfiguration(ctx, createComponentProxyConfigSupplier(ctx));
 
         final Proxy.Type proxyType = proxyConfig.getProxyType();
@@ -564,24 +574,6 @@ public class FTPTransfer implements FileTransfer {
                 client.setSocketFactory(new SocksProxySocketFactory(new Proxy(proxyType, new InetSocketAddress(proxyHost, proxyPort))));
             }
         }
-
-        return client;
-    }
-
-    private FTPClient getClient(final FlowFile flowFile) throws IOException {
-        if (client != null) {
-            String desthost = ctx.getProperty(HOSTNAME).evaluateAttributeExpressions(flowFile).getValue();
-            if (remoteHostName.equals(desthost)) {
-                // destination matches so we can keep our current session
-                resetWorkingDirectory();
-                return client;
-            } else {
-                // this flowFile is going to a different destination, reset session
-                close();
-            }
-        }
-
-        FTPClient client = createFTPClient();
         this.client = client;
         client.setBufferSize(ctx.getProperty(BUFFER_SIZE).asDataSize(DataUnit.B).intValue());
         client.setDataTimeout(ctx.getProperty(DATA_TIMEOUT).asTimePeriod(TimeUnit.MILLISECONDS).intValue());

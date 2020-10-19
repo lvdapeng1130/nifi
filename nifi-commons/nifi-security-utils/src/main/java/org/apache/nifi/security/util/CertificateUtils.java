@@ -38,6 +38,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.naming.InvalidNameException;
 import javax.naming.ldap.LdapName;
 import javax.naming.ldap.Rdn;
@@ -48,8 +50,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.bouncycastle.asn1.ASN1Encodable;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.ASN1Set;
-import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.DLSequence;
+import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.pkcs.Attribute;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
@@ -199,7 +201,7 @@ public final class CertificateUtils {
 
             boolean clientMode = sslSocket.getUseClientMode();
             logger.debug("SSL Socket in {} mode", clientMode ? "client" : "server");
-            ClientAuth clientAuth = getClientAuthStatus(sslSocket);
+            SslContextFactory.ClientAuth clientAuth = getClientAuthStatus(sslSocket);
             logger.debug("SSL Socket client auth status: {}", clientAuth);
 
             if (clientMode) {
@@ -232,10 +234,10 @@ public final class CertificateUtils {
          * This method should throw an exception if none are provided for need, return null if none are provided for want, and return null (without checking) for none.
          */
 
-        ClientAuth clientAuth = getClientAuthStatus(sslSocket);
+        SslContextFactory.ClientAuth clientAuth = getClientAuthStatus(sslSocket);
         logger.debug("SSL Socket client auth status: {}", clientAuth);
 
-        if (clientAuth != ClientAuth.NONE) {
+        if (clientAuth != SslContextFactory.ClientAuth.NONE) {
             try {
                 final Certificate[] certChains = sslSocket.getSession().getPeerCertificates();
                 if (certChains != null && certChains.length > 0) {
@@ -248,9 +250,9 @@ public final class CertificateUtils {
                     logger.error("The incoming request did not contain client certificates and thus the DN cannot" +
                             " be extracted. Check that the other endpoint is providing a complete client certificate chain");
                 }
-                if (clientAuth == ClientAuth.WANT) {
+                if (clientAuth == SslContextFactory.ClientAuth.WANT) {
                     logger.warn("Suppressing missing client certificate exception because client auth is set to 'want'");
-                    return null;
+                    return dn;
                 }
                 throw new CertificateException(e);
             }
@@ -287,8 +289,8 @@ public final class CertificateUtils {
         return dn;
     }
 
-    private static ClientAuth getClientAuthStatus(SSLSocket sslSocket) {
-        return sslSocket.getNeedClientAuth() ? ClientAuth.REQUIRED : sslSocket.getWantClientAuth() ? ClientAuth.WANT : ClientAuth.NONE;
+    private static SslContextFactory.ClientAuth getClientAuthStatus(SSLSocket sslSocket) {
+        return sslSocket.getNeedClientAuth() ? SslContextFactory.ClientAuth.REQUIRED : sslSocket.getWantClientAuth() ? SslContextFactory.ClientAuth.WANT : SslContextFactory.ClientAuth.NONE;
     }
 
     /**
@@ -622,6 +624,66 @@ public final class CertificateUtils {
             } else {
                 return false;
             }
+        }
+    }
+
+    /**
+     * Returns the JVM Java major version based on the System properties (e.g. {@code JVM 1.8.0.231} -> {code 8}).
+     *
+     * @return the Java major version
+     */
+    public static int getJavaVersion() {
+        String version = System.getProperty("java.version");
+        return parseJavaVersion(version);
+    }
+
+    /**
+     * Returns the major version parsed from the provided Java version string (e.g. {@code "1.8.0.231"} -> {@code 8}).
+     *
+     * @param version the Java version string
+     * @return the major version as an int
+     */
+    public static int parseJavaVersion(String version) {
+        String majorVersion;
+        if (version.startsWith("1.")) {
+            majorVersion = version.substring(2, 3);
+        } else {
+            Pattern majorVersion9PlusPattern = Pattern.compile("(\\d+).*");
+            Matcher m = majorVersion9PlusPattern.matcher(version);
+            if (m.find()) {
+                majorVersion = m.group(1);
+            } else {
+                throw new IllegalArgumentException("Could not detect major version of " + version);
+            }
+        }
+        return Integer.parseInt(majorVersion);
+    }
+
+    /**
+     * Returns a {@code String[]} of supported TLS protocol versions based on the current Java platform version.
+     *
+     * @return the supported TLS protocol version(s)
+     */
+    public static String[] getCurrentSupportedTlsProtocolVersions() {
+        int javaMajorVersion = getJavaVersion();
+        if (javaMajorVersion < 11) {
+            return JAVA_8_SUPPORTED_TLS_PROTOCOL_VERSIONS;
+        } else {
+            return JAVA_11_SUPPORTED_TLS_PROTOCOL_VERSIONS;
+        }
+    }
+
+    /**
+     * Returns the highest supported TLS protocol version based on the current Java platform version.
+     *
+     * @return the TLS protocol (e.g. {@code "TLSv1.2"})
+     */
+    public static String getHighestCurrentSupportedTlsProtocolVersion() {
+        int javaMajorVersion = getJavaVersion();
+        if (javaMajorVersion < 11) {
+            return JAVA_8_MAX_SUPPORTED_TLS_PROTOCOL_VERSION;
+        } else {
+            return JAVA_11_MAX_SUPPORTED_TLS_PROTOCOL_VERSION;
         }
     }
 

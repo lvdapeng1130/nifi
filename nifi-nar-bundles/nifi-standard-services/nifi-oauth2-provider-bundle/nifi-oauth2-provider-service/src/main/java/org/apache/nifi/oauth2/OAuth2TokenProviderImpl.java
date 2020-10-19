@@ -18,10 +18,6 @@
 package org.apache.nifi.oauth2;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import javax.net.ssl.SSLContext;
 import okhttp3.FormBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -34,11 +30,16 @@ import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.controller.AbstractControllerService;
 import org.apache.nifi.controller.ConfigurationContext;
 import org.apache.nifi.processor.exception.ProcessException;
-import org.apache.nifi.security.util.ClientAuth;
 import org.apache.nifi.security.util.OkHttpClientUtils;
 import org.apache.nifi.security.util.TlsConfiguration;
 import org.apache.nifi.ssl.SSLContextService;
+import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.util.StringUtils;
+
+import javax.net.ssl.SSLContext;
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 
 @Tags({"oauth2", "provider", "authorization" })
 @CapabilityDescription("This controller service provides a way of working with access and refresh tokens via the " +
@@ -52,15 +53,15 @@ public class OAuth2TokenProviderImpl extends AbstractControllerService implement
 
     private String resourceServerUrl;
     private SSLContext sslContext;
-    private SSLContextService sslService;
+    private SSLContextService sslContextService;
 
     @OnEnabled
     public void onEnabled(ConfigurationContext context) {
         resourceServerUrl = context.getProperty(ACCESS_TOKEN_URL).evaluateAttributeExpressions().getValue();
 
-        sslService = context.getProperty(SSL_CONTEXT).asControllerService(SSLContextService.class);
+        sslContextService = context.getProperty(SSL_CONTEXT).asControllerService(SSLContextService.class);
 
-        sslContext = sslService == null ? null : sslService.createSSLContext(ClientAuth.NONE);
+        sslContext = sslContextService == null ? null : sslContextService.createSSLContext(SslContextFactory.ClientAuth.NONE);
     }
 
 
@@ -89,8 +90,8 @@ public class OAuth2TokenProviderImpl extends AbstractControllerService implement
     private OkHttpClient.Builder getClientBuilder() {
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
 
-        if (sslService != null) {
-            final TlsConfiguration tlsConfiguration = sslService.createTlsConfiguration();
+        if (sslContextService != null) {
+            final TlsConfiguration tlsConfiguration = sslContextService.createTlsConfiguration();
             OkHttpClientUtils.applyTlsToOkHttpClientBuilder(tlsConfiguration, clientBuilder);
         }
 

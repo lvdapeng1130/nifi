@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
+
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.FlowFileHandlingException;
@@ -501,36 +502,6 @@ public class MockProvenanceReporter implements ProvenanceReporter {
                 logger.error("", e);
             }
         }
-    }
-
-    @Override
-    public int getFlowFilesReceived() {
-        return 0;
-    }
-
-    @Override
-    public long getBytesReceived() {
-        return 0;
-    }
-
-    @Override
-    public int getFlowFilesFetched() {
-        return 0;
-    }
-
-    @Override
-    public long getBytesFetched() {
-        return 0;
-    }
-
-    @Override
-    public int getFlowFilesSent() {
-        return 0;
-    }
-
-    @Override
-    public long getBytesSent() {
-        return 0;
     }
 
     ProvenanceEventBuilder build(final FlowFile flowFile, final ProvenanceEventType eventType) {

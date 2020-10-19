@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 public class StandardProvenanceReporter implements ProvenanceReporter {
 
+    public static final String NIFI_NAMESPACE = "nifi";
     private final Logger logger = LoggerFactory.getLogger(StandardProvenanceReporter.class);
     private final String processorId;
     private final String processorType;
@@ -41,12 +42,6 @@ public class StandardProvenanceReporter implements ProvenanceReporter {
     private final ProvenanceEventRepository repository;
     private final ProvenanceEventEnricher eventEnricher;
     private final StandardProcessSession session;
-    private long bytesSent = 0L;
-    private long bytesReceived = 0L;
-    private int flowFilesSent = 0;
-    private int flowFilesReceived = 0;
-    private int flowFilesFetched = 0;
-    private long bytesFetched = 0L;
 
     public StandardProvenanceReporter(final StandardProcessSession session, final String processorId, final String processorType,
         final ProvenanceEventRepository repository, final ProvenanceEventEnricher enricher) {
@@ -143,9 +138,6 @@ public class StandardProvenanceReporter implements ProvenanceReporter {
             final ProvenanceEventRecord record = build(flowFile, ProvenanceEventType.RECEIVE)
                 .setTransitUri(transitUri).setSourceSystemFlowFileIdentifier(sourceSystemFlowFileIdentifier).setEventDuration(transmissionMillis).setDetails(details).build();
             events.add(record);
-
-            bytesReceived += flowFile.getSize();
-            flowFilesReceived++;
         } catch (final Exception e) {
             logger.error("Failed to generate Provenance Event due to " + e);
             if (logger.isDebugEnabled()) {
@@ -174,11 +166,7 @@ public class StandardProvenanceReporter implements ProvenanceReporter {
                 .setEventDuration(transmissionMillis)
                 .setDetails(details)
                 .build();
-
             events.add(record);
-
-            bytesFetched += flowFile.getSize();
-            flowFilesFetched++;
         } catch (final Exception e) {
             logger.error("Failed to generate Provenance Event due to " + e);
             if (logger.isDebugEnabled()) {
@@ -230,9 +218,6 @@ public class StandardProvenanceReporter implements ProvenanceReporter {
             } else {
                 events.add(enriched);
             }
-
-            bytesSent += flowFile.getSize();
-            flowFilesSent++;
         } catch (final Exception e) {
             logger.error("Failed to generate Provenance Event due to " + e);
             if (logger.isDebugEnabled()) {
@@ -533,35 +518,5 @@ public class StandardProvenanceReporter implements ProvenanceReporter {
         builder.setComponentId(processorId);
         builder.setComponentType(processorType);
         return builder;
-    }
-
-    @Override
-    public int getFlowFilesSent() {
-        return flowFilesSent;
-    }
-
-    @Override
-    public long getBytesSent() {
-        return bytesSent;
-    }
-
-    @Override
-    public int getFlowFilesReceived() {
-        return flowFilesReceived;
-    }
-
-    @Override
-    public long getBytesReceived() {
-        return bytesReceived;
-    }
-
-    @Override
-    public int getFlowFilesFetched() {
-        return flowFilesFetched;
-    }
-
-    @Override
-    public long getBytesFetched() {
-        return bytesFetched;
     }
 }

@@ -67,11 +67,8 @@ public class ITestKuduLookupService {
                 .addTabletServerFlag("--use_hybrid_clock=false")
     );
     private TestRunner testRunner;
-    private KuduLookupService kuduLookupService;
-
-    private final java.sql.Date today = new java.sql.Date(System.currentTimeMillis());
-    private final java.sql.Date pastDate = java.sql.Date.valueOf("2019-01-01");
     private long nowMillis = System.currentTimeMillis();
+    private KuduLookupService kuduLookupService;
 
     public static class SampleProcessor extends AbstractProcessor {
         @Override
@@ -103,7 +100,6 @@ public class ITestKuduLookupService {
         columns.add(new ColumnSchema.ColumnSchemaBuilder("int32", Type.INT32).build());
         columns.add(new ColumnSchema.ColumnSchemaBuilder("int64", Type.INT64).build());
         columns.add(new ColumnSchema.ColumnSchemaBuilder("unixtime_micros", Type.UNIXTIME_MICROS).build());
-        columns.add(new ColumnSchema.ColumnSchemaBuilder("sql_date", Type.DATE).build());
         columns.add(new ColumnSchema.ColumnSchemaBuilder("varchar_3", Type.VARCHAR).typeAttributes(
                 new ColumnTypeAttributes.ColumnTypeAttributesBuilder().length(3).build()
         ).build());
@@ -128,7 +124,6 @@ public class ITestKuduLookupService {
         row.addInt("int32",3);
         row.addLong("int64",4L);
         row.addTimestamp("unixtime_micros", new Timestamp(nowMillis));
-        row.addDate("sql_date", today);
         row.addVarchar("varchar_3", "SFO");
         session.apply(insert);
 
@@ -145,7 +140,6 @@ public class ITestKuduLookupService {
         row.addInt("int32",13);
         row.addLong("int64",14L);
         row.addTimestamp("unixtime_micros", new Timestamp(nowMillis+(1000L * 60 * 60 * 24 * 365))); //+ 1 year
-        row.addDate("sql_date", pastDate);
         row.addVarchar("varchar_3", "SJC");
         session.apply(insert);
 
@@ -210,7 +204,6 @@ public class ITestKuduLookupService {
         map.put("int32",3);
         map.put("int64",4L);
         map.put("unixtime_micros", new Timestamp(nowMillis));
-        map.put("sql_date", today);
         map.put("varchar_3", "SFO");
         Record result = kuduLookupService.lookup(map).get();
         validateRow1(result);
@@ -231,6 +224,7 @@ public class ITestKuduLookupService {
         assertEquals(true, result.getAsBoolean("bool"));
     }
     private void validateRow1(Record result){
+
         assertEquals("string1", result.getAsString("string"));
         assertEquals(Base64.getEncoder().encodeToString("binary1".getBytes()), result.getValue("binary"));
         assertEquals(true, result.getAsBoolean("bool"));
@@ -243,7 +237,6 @@ public class ITestKuduLookupService {
         assertEquals(4L, (long)result.getAsLong("int64"));
         assertEquals(new Timestamp(nowMillis), result.getValue("unixtime_micros"));
         assertEquals("SFO", result.getValue("varchar_3"));
-        assertEquals(today.toString(), result.getValue("sql_date").toString());
     }
 
 }

@@ -14,42 +14,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.nifi;
 
-/*
-    Logout Styles
-*/
+import org.apache.nifi.bundle.Bundle;
+import org.apache.nifi.diagnostics.DiagnosticsFactory;
+import org.apache.nifi.nar.ExtensionMapping;
 
-#logout-contents-container {
-    position: absolute;
-    top: 0px;
-    left: 0px;
-    bottom: 0px;
-    right: 0px;
-    background: #fff url(../images/bg-error.png) left top no-repeat;
-    padding-top: 100px;
-    padding-left: 100px;
-}
+import java.util.Set;
 
-#logout-message-title {
-    font-size: 18px;
-    color: #294c58;
-    margin-bottom: 16px;
-}
+/**
+ *
+ */
+public interface NiFiServer {
 
-#logout-message {
-    font-size: 11px;
-}
+    void start();
 
-#logout-user-links-container {
-    position: absolute;
-    top: 0px;
-    left: 0px;
-    padding-top: 100px;
-    padding-left: 100px;
-    z-index: 1300;
-    width: 412px;
-}
+    void setExtensionMapping(ExtensionMapping extensionMapping);
 
-#logout-user-links {
-    float: right;
+    void setBundles(Bundle systemBundle, Set<Bundle> bundles);
+
+    void stop();
+
+    DiagnosticsFactory getDiagnosticsFactory();
+
+    DiagnosticsFactory getThreadDumpFactory();
 }

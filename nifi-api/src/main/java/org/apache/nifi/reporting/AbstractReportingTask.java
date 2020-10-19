@@ -17,6 +17,7 @@
 package org.apache.nifi.reporting;
 
 import java.util.concurrent.TimeUnit;
+
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.AbstractConfigurableComponent;
 import org.apache.nifi.controller.ConfigurationContext;

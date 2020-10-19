@@ -73,25 +73,11 @@ public class PutAzureBlobStorage extends AbstractAzureBlobProcessor {
             .required(true)
             .build();
 
-    public static final PropertyDescriptor CREATE_CONTAINER = new PropertyDescriptor.Builder()
-            .name("azure-create-container")
-            .displayName("Create Container")
-            .expressionLanguageSupported(ExpressionLanguageScope.NONE)
-            .required(true)
-            .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
-            .allowableValues("true", "false")
-            .defaultValue("false")
-            .description("Specifies whether to check if the container exists and to automatically create it if it does not. " +
-                  "Permission to list containers is required. If false, this check is not made, but the Put operation " +
-                  "will fail if the container does not exist.")
-            .build();
-
     @Override
     public List<PropertyDescriptor> getSupportedPropertyDescriptors() {
         List<PropertyDescriptor> properties = new ArrayList<>(super.getSupportedPropertyDescriptors());
         properties.remove(BLOB);
         properties.add(BLOB_NAME);
-        properties.add(CREATE_CONTAINER);
         return properties;
     }
 
@@ -107,15 +93,11 @@ public class PutAzureBlobStorage extends AbstractAzureBlobProcessor {
 
         String blobPath = context.getProperty(BLOB_NAME).evaluateAttributeExpressions(flowFile).getValue();
 
-        final boolean createContainer = context.getProperty(CREATE_CONTAINER).asBoolean();
-
         AtomicReference<Exception> storedException = new AtomicReference<>();
         try {
             CloudBlobClient blobClient = AzureStorageUtils.createCloudBlobClient(context, getLogger(), flowFile);
             CloudBlobContainer container = blobClient.getContainerReference(containerName);
-
-            if (createContainer)
-                container.createIfNotExists();
+            container.createIfNotExists();
 
             CloudBlob blob = container.getBlockBlobReference(blobPath);
 

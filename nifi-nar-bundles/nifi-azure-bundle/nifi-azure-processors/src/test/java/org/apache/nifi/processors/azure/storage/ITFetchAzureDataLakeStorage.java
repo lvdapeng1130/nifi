@@ -29,7 +29,6 @@ import org.junit.Test;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -223,9 +222,7 @@ public class ITFetchAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT 
         // GIVEN
         String directory = "TestDirectory";
         String filename = "testFile.txt";
-        Random random = new Random();
-        byte[] fileContentBytes = new byte[120_000_000];
-        random.nextBytes(fileContentBytes);
+        byte[] fileContentBytes = new byte[100_000_000];
         String fileContent = new String(fileContentBytes);
         String inputFlowFileContent = "InputFlowFileContent";
 

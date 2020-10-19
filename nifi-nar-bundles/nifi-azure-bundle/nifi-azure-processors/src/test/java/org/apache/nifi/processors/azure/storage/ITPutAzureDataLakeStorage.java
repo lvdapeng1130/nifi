@@ -32,7 +32,6 @@ import org.junit.Test;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -138,9 +137,7 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
     // ignore excessive test with larger file size
     @Test
     public void testPutBigFile() throws Exception {
-        Random random = new Random();
-        byte[] fileData = new byte[120_000_000];
-        random.nextBytes(fileData);
+        byte[] fileData = new byte[100_000_000];
 
         runProcessor(fileData);
 

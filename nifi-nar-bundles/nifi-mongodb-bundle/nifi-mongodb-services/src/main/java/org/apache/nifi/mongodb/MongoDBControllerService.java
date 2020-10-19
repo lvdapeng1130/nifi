@@ -34,7 +34,7 @@ import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.controller.AbstractControllerService;
 import org.apache.nifi.controller.ConfigurationContext;
-import org.apache.nifi.security.util.ClientAuth;
+import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.ssl.SSLContextService;
 
 @Tags({"mongo", "mongodb", "service"})
@@ -61,7 +61,6 @@ public class MongoDBControllerService extends AbstractControllerService implemen
 
     protected MongoClient mongoClient;
 
-    // TODO: Remove duplicate code by refactoring shared method to accept PropertyContext
     protected final void createClient(ConfigurationContext context) {
         if (mongoClient != null) {
             closeClient();
@@ -75,15 +74,15 @@ public class MongoDBControllerService extends AbstractControllerService implemen
         final SSLContext sslContext;
 
         if (sslService != null) {
-            final ClientAuth clientAuth;
+            final SslContextFactory.ClientAuth clientAuth;
             if (StringUtils.isBlank(rawClientAuth)) {
-                clientAuth = ClientAuth.REQUIRED;
+                clientAuth = SslContextFactory.ClientAuth.REQUIRED;
             } else {
                 try {
-                    clientAuth = ClientAuth.valueOf(rawClientAuth);
+                    clientAuth = SslContextFactory.ClientAuth.valueOf(rawClientAuth);
                 } catch (final IllegalArgumentException iae) {
                     throw new IllegalStateException(String.format("Unrecognized client auth '%s'. Possible values are [%s]",
-                            rawClientAuth, StringUtils.join(ClientAuth.values(), ", ")));
+                            rawClientAuth, StringUtils.join(SslContextFactory.ClientAuth.values(), ", ")));
                 }
             }
             sslContext = sslService.createSSLContext(clientAuth);

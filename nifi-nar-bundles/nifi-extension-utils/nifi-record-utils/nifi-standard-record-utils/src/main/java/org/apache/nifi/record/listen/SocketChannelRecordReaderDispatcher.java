@@ -16,6 +16,13 @@
  */
 package org.apache.nifi.record.listen;
 
+import org.apache.nifi.logging.ComponentLog;
+import org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel;
+import org.apache.nifi.security.util.SslContextFactory;
+import org.apache.nifi.serialization.RecordReaderFactory;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
 import java.io.Closeable;
 import java.net.SocketAddress;
 import java.net.StandardSocketOptions;
@@ -23,12 +30,6 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
-import org.apache.nifi.logging.ComponentLog;
-import org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel;
-import org.apache.nifi.security.util.ClientAuth;
-import org.apache.nifi.serialization.RecordReaderFactory;
 
 /**
  * Accepts connections on the given ServerSocketChannel and dispatches a SocketChannelRecordReader for processing.
@@ -37,7 +38,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
     private final ServerSocketChannel serverSocketChannel;
     private final SSLContext sslContext;
-    private final ClientAuth clientAuth;
+    private final SslContextFactory.ClientAuth clientAuth;
     private final int socketReadTimeout;
     private final int receiveBufferSize;
     private final int maxConnections;
@@ -51,7 +52,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
     public SocketChannelRecordReaderDispatcher(final ServerSocketChannel serverSocketChannel,
                                                final SSLContext sslContext,
-                                               final ClientAuth clientAuth,
+                                               final SslContextFactory.ClientAuth clientAuth,
                                                final int socketReadTimeout,
                                                final int receiveBufferSize,
                                                final int maxConnections,

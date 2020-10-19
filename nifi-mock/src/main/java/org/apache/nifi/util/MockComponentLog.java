@@ -17,6 +17,7 @@
 package org.apache.nifi.util;
 
 import java.util.List;
+
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.logging.LogLevel;
 import org.slf4j.Logger;

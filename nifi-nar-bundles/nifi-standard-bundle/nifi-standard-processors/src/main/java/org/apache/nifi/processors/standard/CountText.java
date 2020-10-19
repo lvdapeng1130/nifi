@@ -34,8 +34,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
 import org.apache.nifi.annotation.behavior.EventDriven;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
@@ -322,14 +320,12 @@ public class CountText extends AbstractProcessor {
             return 0;
         } else {
             Pattern regex = splitWordsOnSymbols ? SYMBOL_PATTERN : WHITESPACE_ONLY_PATTERN;
-            final Stream<String> wordsStream = regex.splitAsStream(line).filter(item -> !item.trim().isEmpty());
+            final String[] words = regex.split(line);
+            // TODO: Trim individual words before counting to eliminate whitespace words?
             if (getLogger().isDebugEnabled()) {
-                final List<String> words = wordsStream.collect(Collectors.toList());
-                getLogger().debug("Split [" + line + "] to [" + StringUtils.join(words, ", ") + "] (" + words.size() + ")");
-                return Math.toIntExact(words.size());
-            } else {
-                return Math.toIntExact(wordsStream.count());
+                getLogger().debug("Split [" + line + "] to [" + StringUtils.join(Arrays.asList(words), ", ") + "] (" + words.length + ")");
             }
+            return words.length;
         }
     }
 

@@ -25,7 +25,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import org.apache.nifi.components.AllowableValue;
-import org.apache.nifi.security.util.TlsConfiguration;
+import org.apache.nifi.security.util.CertificateUtils;
 import org.junit.Test;
 
 public class RestrictedSSLContextServiceTest {
@@ -34,9 +34,9 @@ public class RestrictedSSLContextServiceTest {
     public void testTLSAlgorithms() {
         final Set<String> expected = new HashSet<>();
         expected.add("TLS");
-        expected.addAll(Arrays.asList(TlsConfiguration.getCurrentSupportedTlsProtocolVersions()));
+        expected.addAll(Arrays.asList(CertificateUtils.getCurrentSupportedTlsProtocolVersions()));
 
-        final AllowableValue[] allowableValues = StandardRestrictedSSLContextService.buildAlgorithmAllowableValues();
+        final AllowableValue[] allowableValues = RestrictedSSLContextService.buildAlgorithmAllowableValues();
         assertThat(allowableValues, notNullValue());
         assertThat(allowableValues.length, equalTo(expected.size()));
         for(final AllowableValue value : allowableValues) {

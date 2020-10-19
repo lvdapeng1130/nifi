@@ -1525,12 +1525,7 @@ public class DataTypeUtils {
         }
 
         if (value instanceof Number) {
-            try {
-                return Math.toIntExact(((Number) value).longValue());
-            } catch (ArithmeticException ae) {
-                throw new IllegalTypeConversionException("Cannot convert value [" + value + "] of type " + value.getClass() + " to Integer for field " + fieldName
-                        + " as it causes an arithmetic overflow (the value is too large, e.g.)", ae);
-            }
+            return ((Number) value).intValue();
         }
 
         if (value instanceof String) {

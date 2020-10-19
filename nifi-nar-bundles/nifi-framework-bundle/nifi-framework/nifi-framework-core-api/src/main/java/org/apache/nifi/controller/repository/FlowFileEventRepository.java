@@ -51,10 +51,4 @@ public interface FlowFileEventRepository extends Closeable {
      * @param componentIdentifier Identifier of the component
      */
     void purgeTransferEvents(String componentIdentifier);
-
-    /**
-     * Reports aggregate metrics for all flowfile events
-     * @return a report of processing activity
-     */
-    FlowFileEvent reportAggregateEvent();
 }

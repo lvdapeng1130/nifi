@@ -311,12 +311,11 @@ public class GetMongoIT {
          * Test original behavior; Manually set query of {}, no input
          */
         final String attr = "query.attr";
-        final String queryValue = "{}";
-        runner.setProperty(GetMongo.QUERY, queryValue);
+        runner.setProperty(GetMongo.QUERY, "{}");
         runner.setProperty(GetMongo.QUERY_ATTRIBUTE, attr);
         runner.run();
         runner.assertTransferCount(GetMongo.REL_SUCCESS, 3);
-        testQueryAttribute(attr, queryValue);
+        testQueryAttribute(attr, "{ }");
 
         runner.clearTransferState();
 
@@ -326,7 +325,7 @@ public class GetMongoIT {
         runner.removeProperty(GetMongo.QUERY);
         runner.setIncomingConnection(false);
         runner.run();
-        testQueryAttribute(attr, queryValue);
+        testQueryAttribute(attr, "{ }");
 
         runner.clearTransferState();
 
@@ -337,7 +336,7 @@ public class GetMongoIT {
         runner.setIncomingConnection(true);
         runner.enqueue("{}");
         runner.run();
-        testQueryAttribute(attr, queryValue);
+        testQueryAttribute(attr, "{ }");
 
         /*
          * Input flowfile with invalid query

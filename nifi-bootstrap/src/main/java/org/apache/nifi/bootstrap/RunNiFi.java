@@ -253,7 +253,6 @@ public class RunNiFi {
                 break;
             case "diagnostics":
                 runNiFi.diagnostics(dumpFile, verbose);
-                break;
             case "env":
                 runNiFi.env();
                 break;
