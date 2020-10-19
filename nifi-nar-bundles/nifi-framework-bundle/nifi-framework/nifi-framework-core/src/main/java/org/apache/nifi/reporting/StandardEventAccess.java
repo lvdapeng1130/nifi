@@ -740,5 +740,44 @@ public class StandardEventAccess implements UserAwareEventAccess {
     @Override
     public KyCounter resetKyCounter(final String identifier) {
         return flowController.resetKyCounter(identifier);
+	}
+    /**
+     * Returns the total number of bytes read by this instance (at the root process group level, i.e. all events) since the instance started
+     *
+     * @return the total number of bytes read by this instance
+     */
+    @Override
+    public long getTotalBytesRead() {
+        return flowFileEventRepository.reportAggregateEvent().getBytesRead();
+    }
+
+    /**
+     * Returns the total number of bytes written by this instance (at the root process group level, i.e. all events) since the instance started
+     *
+     * @return the total number of bytes written by this instance
+     */
+    @Override
+    public long getTotalBytesWritten() {
+        return flowFileEventRepository.reportAggregateEvent().getBytesWritten();
+    }
+
+    /**
+     * Returns the total number of bytes sent by this instance (at the root process group level) since the instance started
+     *
+     * @return the total number of bytes sent by this instance
+     */
+    @Override
+    public long getTotalBytesSent() {
+        return flowFileEventRepository.reportAggregateEvent().getBytesSent();
+    }
+
+    /**
+     * Returns the total number of bytes received by this instance (at the root process group level) since the instance started
+     *
+     * @return the total number of bytes received by this instance
+     */
+    @Override
+    public long getTotalBytesReceived() {
+        return flowFileEventRepository.reportAggregateEvent().getBytesReceived();
     }
 }
