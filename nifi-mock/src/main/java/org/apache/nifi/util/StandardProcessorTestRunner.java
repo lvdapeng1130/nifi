@@ -16,43 +16,8 @@
  */
 package org.apache.nifi.util;
 
-import static java.util.Objects.requireNonNull;
-
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.InvocationTargetException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Predicate;
 import org.apache.nifi.annotation.behavior.TriggerSerially;
-import org.apache.nifi.annotation.lifecycle.OnAdded;
-import org.apache.nifi.annotation.lifecycle.OnConfigurationRestored;
-import org.apache.nifi.annotation.lifecycle.OnDisabled;
-import org.apache.nifi.annotation.lifecycle.OnEnabled;
-import org.apache.nifi.annotation.lifecycle.OnRemoved;
-import org.apache.nifi.annotation.lifecycle.OnScheduled;
-import org.apache.nifi.annotation.lifecycle.OnShutdown;
-import org.apache.nifi.annotation.lifecycle.OnStopped;
-import org.apache.nifi.annotation.lifecycle.OnUnscheduled;
+import org.apache.nifi.annotation.lifecycle.*;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
@@ -72,6 +37,21 @@ import org.apache.nifi.registry.VariableDescriptor;
 import org.apache.nifi.reporting.InitializationException;
 import org.apache.nifi.state.MockStateManager;
 import org.junit.Assert;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
+
+import static java.util.Objects.requireNonNull;
 
 public class StandardProcessorTestRunner implements TestRunner {
 
@@ -792,19 +772,7 @@ public class StandardProcessorTestRunner implements TestRunner {
         final Map<PropertyDescriptor, String> updatedProps = new HashMap<>(curProps);
 
         final ValidationContext validationContext = new MockValidationContext(context, serviceStateManager, variableRegistry).getControllerServiceValidationContext(service);
-        final boolean dependencySatisfied = validationContext.isDependencySatisfied(property, processor::getPropertyDescriptor);
-
-        final ValidationResult validationResult;
-        if (dependencySatisfied) {
-            validationResult = property.validate(value, validationContext);
-        } else {
-            validationResult = new ValidationResult.Builder()
-                .valid(true)
-                .input(value)
-                .subject(property.getDisplayName())
-                .explanation("Property is dependent upon another property, and this dependency is not satisfied, so value is considered valid")
-                .build();
-        }
+        final ValidationResult validationResult = property.validate(value, validationContext);
 
         final String oldValue = updatedProps.get(property);
         updatedProps.put(property, value);
@@ -822,11 +790,11 @@ public class StandardProcessorTestRunner implements TestRunner {
         final PropertyDescriptor descriptor = service.getPropertyDescriptor(propertyName);
         if (descriptor == null) {
             return new ValidationResult.Builder()
-                .input(propertyName)
-                .explanation(propertyName + " is not a known Property for Controller Service " + service)
-                .subject("Invalid property")
-                .valid(false)
-                .build();
+                    .input(propertyName)
+                    .explanation(propertyName + " is not a known Property for Controller Service " + service)
+                    .subject("Invalid property")
+                    .valid(false)
+                    .build();
         }
         return setProperty(service, descriptor, value);
     }
@@ -992,7 +960,6 @@ public class StandardProcessorTestRunner implements TestRunner {
             }
         }
     }
-
 
     /**
      * Set the Run Schedule parameter (in milliseconds). If set, this will be the duration

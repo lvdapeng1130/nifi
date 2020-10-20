@@ -646,11 +646,6 @@ public class TestStandardProcessorNode {
                     public boolean isParameterSet(final String parameterName) {
                         return false;
                     }
-
-                    @Override
-                    public boolean isDependencySatisfied(final PropertyDescriptor propertyDescriptor, final Function<String, PropertyDescriptor> propertyDescriptorLookup) {
-                        return false;
-                    }
                 };
             }
 
