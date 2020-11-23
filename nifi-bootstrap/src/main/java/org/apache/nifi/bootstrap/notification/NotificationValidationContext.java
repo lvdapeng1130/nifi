@@ -140,4 +140,8 @@ public class NotificationValidationContext implements ValidationContext {
         return false;
     }
 
+    @Override
+    public boolean isDependencySatisfied(final PropertyDescriptor propertyDescriptor, final Function<String, PropertyDescriptor> propertyDescriptorLookup) {
+        return true;
+    }
 }

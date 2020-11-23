@@ -34,6 +34,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -480,8 +481,8 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         controllerServiceProvider = new StandardControllerServiceProvider(this, processScheduler, bulletinRepository);
 
         eventDrivenSchedulingAgent = new EventDrivenSchedulingAgent(
-                eventDrivenEngineRef.get(), controllerServiceProvider, stateManagerProvider,
-                eventDrivenWorkerQueue, repositoryContextFactory, maxEventDrivenThreads.get(), encryptor, extensionManager);
+                eventDrivenEngineRef.get(), controllerServiceProvider, stateManagerProvider, eventDrivenWorkerQueue,
+                repositoryContextFactory, maxEventDrivenThreads.get(), encryptor, extensionManager, this);
         processScheduler.setSchedulingAgent(SchedulingStrategy.EVENT_DRIVEN, eventDrivenSchedulingAgent);
 
         final QuartzSchedulingAgent quartzSchedulingAgent = new QuartzSchedulingAgent(this, timerDrivenEngineRef.get(), repositoryContextFactory, encryptor);
@@ -2221,6 +2222,25 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         }
     }
 
+    @Override
+    public Set<String> getClusterMembers() {
+        if (isClustered()) {
+            return clusterCoordinator.getConnectionStatuses().stream().map(s -> s.getNodeIdentifier().getApiAddress()).collect(Collectors.toSet());
+        } else {
+            return Collections.emptySet();
+        }
+    }
+
+    @Override
+    public Optional<String> getCurrentNode() {
+        if (isClustered() && getNodeId() != null) {
+            return Optional.of(getNodeId().getApiAddress());
+        } else {
+            return Optional.empty();
+        }
+    }
+
+    @Override
     public boolean isConfiguredForClustering() {
         return configuredForClustering;
     }
@@ -2333,8 +2353,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             }
 
             if (!clustered) {
-                leaderElectionManager.unregister(ClusterRoles.PRIMARY_NODE);
-                leaderElectionManager.unregister(ClusterRoles.CLUSTER_COORDINATOR);
+                onClusterDisconnect();
             }
 
             // update the heartbeat bean
@@ -2342,6 +2361,11 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         } finally {
             writeLock.unlock("setClustered");
         }
+    }
+
+    public void onClusterDisconnect() {
+        leaderElectionManager.unregister(ClusterRoles.PRIMARY_NODE);
+        leaderElectionManager.unregister(ClusterRoles.CLUSTER_COORDINATOR);
     }
 
     public LeaderElectionManager getLeaderElectionManager() {
@@ -2766,6 +2790,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         return resourceClaimManager;
     }
 
+    @Override
     public boolean isConnected() {
         rwLock.readLock().lock();
         try {

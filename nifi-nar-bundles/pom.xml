@@ -103,6 +103,7 @@
 	<module>nifi-rules-action-handler-bundle</module>
 	<module>nifi-accumulo-bundle</module>
 	<module>nifi-file-identity-provider-bundle</module>
+    <module>nifi-hazelcast-bundle</module>
     </modules>
 
     <build>
