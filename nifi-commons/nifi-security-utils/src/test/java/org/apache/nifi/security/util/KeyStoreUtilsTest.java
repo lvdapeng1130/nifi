@@ -17,9 +17,6 @@
 
 package org.apache.nifi.security.util;
 
-import org.junit.BeforeClass;
-import org.junit.Test;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -31,6 +28,8 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -60,6 +59,11 @@ public class KeyStoreUtilsTest {
     }
 
     @Test
+    public void testBcfksKeyStoreRoundTrip() throws GeneralSecurityException, IOException {
+        testKeyStoreRoundTrip(() -> KeyStoreUtils.getKeyStore(KeystoreType.BCFKS.toString().toLowerCase()));
+    }
+
+    @Test
     public void testJksKeyStoreRoundTrip() throws GeneralSecurityException, IOException {
         testKeyStoreRoundTrip(() -> KeyStoreUtils.getKeyStore(KeystoreType.JKS.toString().toLowerCase()));
     }
@@ -77,18 +81,23 @@ public class KeyStoreUtilsTest {
     }
 
     @Test
+    public void testBcfksTrustStoreRoundTrip() throws GeneralSecurityException, IOException {
+        testTrustStoreRoundTrip(() -> KeyStoreUtils.getKeyStore(KeystoreType.BCFKS.toString().toLowerCase()));
+    }
+
+    @Test
     public void testJksTrustStoreRoundTrip() throws GeneralSecurityException, IOException {
-        testTrustStoreRoundTrip(() -> KeyStoreUtils.getTrustStore(KeystoreType.JKS.toString().toLowerCase()));
+        testTrustStoreRoundTrip(() -> KeyStoreUtils.getKeyStore(KeystoreType.JKS.toString().toLowerCase()));
     }
 
     @Test
     public void testPkcs12TrustStoreBcRoundTrip() throws GeneralSecurityException, IOException {
-        testTrustStoreRoundTrip(() -> KeyStoreUtils.getTrustStore(KeystoreType.PKCS12.toString().toLowerCase()));
+        testTrustStoreRoundTrip(() -> KeyStoreUtils.getKeyStore(KeystoreType.PKCS12.toString().toLowerCase()));
     }
 
     @Test
     public void testPkcs12TrustStoreRoundTripBcReload() throws GeneralSecurityException, IOException {
-        testTrustStoreRoundTrip(() -> KeyStore.getInstance(KeystoreType.PKCS12.toString().toLowerCase()), () -> KeyStoreUtils.getTrustStore(KeystoreType.PKCS12.toString().toLowerCase()));
+        testTrustStoreRoundTrip(() -> KeyStore.getInstance(KeystoreType.PKCS12.toString().toLowerCase()), () -> KeyStoreUtils.getKeyStore(KeystoreType.PKCS12.toString().toLowerCase()));
     }
 
     private void testTrustStoreRoundTrip(KeyStoreSupplier keyStoreSupplier) throws GeneralSecurityException, IOException {

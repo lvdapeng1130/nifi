@@ -86,7 +86,7 @@ public class SFTPTransfer implements FileTransfer {
         .name("Private Key Path")
         .description("The fully qualified path to the Private Key file")
         .required(false)
-        .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+        .addValidator(new StandardValidators.FileExistsValidator(true,true))
         .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
         .build();
     public static final PropertyDescriptor PRIVATE_KEY_PASSPHRASE = new PropertyDescriptor.Builder()
@@ -103,7 +103,7 @@ public class SFTPTransfer implements FileTransfer {
                 " otherwise, if 'Strict Host Key Checking' property is applied (set to true)" +
                 " then uses the 'known_hosts' and 'known_hosts2' files from ~/.ssh directory" +
                 " else no host key file will be used")
-        .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+        .addValidator(new StandardValidators.FileExistsValidator(true,true))
         .required(false)
         .build();
     public static final PropertyDescriptor STRICT_HOST_KEY_CHECKING = new PropertyDescriptor.Builder()
@@ -202,7 +202,7 @@ public class SFTPTransfer implements FileTransfer {
         return listing;
     }
 
-    private void getListing(final String path, final int depth, final int maxResults, final List<FileInfo> listing) throws IOException {
+    protected void getListing(final String path, final int depth, final int maxResults, final List<FileInfo> listing) throws IOException {
         if (maxResults < 1 || listing.size() >= maxResults) {
             return;
         }

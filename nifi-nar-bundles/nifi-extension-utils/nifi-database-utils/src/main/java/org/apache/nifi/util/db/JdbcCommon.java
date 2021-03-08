@@ -65,6 +65,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLDataException;
 import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.sql.SQLXML;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -100,6 +101,7 @@ import org.apache.avro.io.DatumWriter;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.avro.AvroTypeUtil;
+import org.apache.nifi.serialization.record.util.DataTypeUtils;
 
 import javax.xml.bind.DatatypeConverter;
 
@@ -160,6 +162,7 @@ public class JdbcCommon {
         private final int maxRows;
         private final boolean convertNames;
         private final boolean useLogicalTypes;
+
         private final int defaultPrecision;
         private final int defaultScale;
         private final CodecFactory codec;
@@ -177,6 +180,14 @@ public class JdbcCommon {
 
         public static Builder builder() {
             return new Builder();
+        }
+
+        public int getDefaultPrecision() {
+            return defaultPrecision;
+        }
+
+        public int getDefaultScale() {
+            return defaultScale;
         }
 
         public static class Builder {
@@ -277,16 +288,21 @@ public class JdbcCommon {
                         if (blob != null) {
                             long numChars = blob.length();
                             byte[] buffer = new byte[(int) numChars];
-                            InputStream is = blob.getBinaryStream();
-                            int index = 0;
-                            int c = is.read();
-                            while (c >= 0) {
-                                buffer[index++] = (byte) c;
-                                c = is.read();
+                            try (InputStream is = blob.getBinaryStream()) {
+                                int index = 0;
+                                int c = is.read();
+                                while (c >= 0) {
+                                    buffer[index++] = (byte) c;
+                                    c = is.read();
+                                }
                             }
                             ByteBuffer bb = ByteBuffer.wrap(buffer);
                             rec.put(i - 1, bb);
-                            blob.free();
+                            try {
+                                blob.free();
+                            } catch (SQLFeatureNotSupportedException sfnse) {
+                                // The driver doesn't support free, but allow processing to continue
+                            }
                         } else {
                             rec.put(i - 1, null);
                         }
@@ -382,6 +398,18 @@ public class JdbcCommon {
                             rec.put(i-1, intValue);
                         } else {
                             rec.put(i-1, value);
+                        }
+
+                    } else if (value instanceof java.sql.Date) {
+                        if (options.useLogicalTypes) {
+                            // Delegate mapping to AvroTypeUtil in order to utilize logical types.
+                            // AvroTypeUtil.convertToAvroObject() expects java.sql.Date object as a UTC normalized date (UTC 00:00:00)
+                            // but it comes from the driver in JVM's local time zone 00:00:00 and needs to be converted.
+                            java.sql.Date normalizedDate = DataTypeUtils.convertDateToUTC((java.sql.Date) value);
+                            rec.put(i - 1, AvroTypeUtil.convertToAvroObject(normalizedDate, fieldSchema));
+                        } else {
+                            // As string for backward compatibility.
+                            rec.put(i - 1, value.toString());
                         }
 
                     } else if (value instanceof Date) {

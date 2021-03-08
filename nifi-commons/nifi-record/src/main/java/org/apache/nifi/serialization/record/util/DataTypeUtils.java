@@ -49,6 +49,10 @@ import java.sql.Types;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -70,6 +74,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+
 
 public class DataTypeUtils {
     private static final Logger logger = LoggerFactory.getLogger(DataTypeUtils.class);
@@ -1085,6 +1090,32 @@ public class DataTypeUtils {
         throw new IllegalTypeConversionException("Cannot convert value [" + value + "] of type " + value.getClass() + " to Date for field " + fieldName);
     }
 
+    /**
+     * Converts a java.sql.Date object in local time zone (typically coming from a java.sql.ResultSet and having 00:00:00 time part)
+     * to UTC normalized form (storing the epoch corresponding to the UTC time with the same date/time as the input).
+     *
+     * @param dateLocalTZ java.sql.Date in local time zone
+     * @return java.sql.Date in UTC normalized form
+     */
+    public static Date convertDateToUTC(Date dateLocalTZ) {
+        ZonedDateTime zdtLocalTZ = ZonedDateTime.ofInstant(Instant.ofEpochMilli(dateLocalTZ.getTime()), ZoneId.systemDefault());
+        ZonedDateTime zdtUTC = zdtLocalTZ.withZoneSameLocal(ZoneOffset.UTC);
+        return new Date(zdtUTC.toInstant().toEpochMilli());
+    }
+
+    /**
+     * Converts a java.sql.Date object in UTC normalized form
+     * to local time zone (storing the epoch corresponding to the local time with the same date/time as the input).
+     *
+     * @param dateUTC java.sql.Date in UTC normalized form
+     * @return java.sql.Date in local time zone
+     */
+    public static Date convertDateToLocalTZ(Date dateUTC) {
+        ZonedDateTime zdtUTC = ZonedDateTime.ofInstant(Instant.ofEpochMilli(dateUTC.getTime()), ZoneOffset.UTC);
+        ZonedDateTime zdtLocalTZ = zdtUTC.withZoneSameLocal(ZoneId.systemDefault());
+        return new Date(zdtLocalTZ.toInstant().toEpochMilli());
+    }
+
     public static boolean isDateTypeCompatible(final Object value, final String format) {
         if (value == null) {
             return false;
@@ -1901,6 +1932,55 @@ public class DataTypeUtils {
                 throw new IllegalTypeConversionException("Cannot convert CHOICE, type must be explicit");
             default:
                 throw new IllegalTypeConversionException("Cannot convert unknown type " + fieldType.name());
+        }
+    }
+
+    /**
+     * Converts the specified java.sql.Types constant field data type (INTEGER = 4, e.g.) into a DataType
+     *
+     * @param sqlType the DataType to be converted
+     * @return the SQL type corresponding to the specified RecordFieldType
+     */
+    public static DataType getDataTypeFromSQLTypeValue(final int sqlType) {
+        switch (sqlType) {
+            case Types.BIGINT:
+                return RecordFieldType.BIGINT.getDataType();
+            case Types.BOOLEAN:
+                return RecordFieldType.BOOLEAN.getDataType();
+            case Types.TINYINT:
+                return RecordFieldType.BYTE.getDataType();
+            case Types.CHAR:
+                return RecordFieldType.CHAR.getDataType();
+            case Types.DATE:
+                return RecordFieldType.DATE.getDataType();
+            case Types.DOUBLE:
+                return RecordFieldType.DOUBLE.getDataType();
+            case Types.FLOAT:
+                return RecordFieldType.FLOAT.getDataType();
+            case Types.NUMERIC:
+                return RecordFieldType.DECIMAL.getDataType();
+            case Types.INTEGER:
+                return RecordFieldType.INT.getDataType();
+            case Types.SMALLINT:
+                return RecordFieldType.SHORT.getDataType();
+            case Types.VARCHAR:
+            case Types.LONGNVARCHAR:
+            case Types.LONGVARCHAR:
+            case Types.NCHAR:
+            case Types.NVARCHAR:
+            case Types.OTHER:
+            case Types.SQLXML:
+                return RecordFieldType.STRING.getDataType();
+            case Types.TIME:
+                return RecordFieldType.TIME.getDataType();
+            case Types.TIMESTAMP:
+                return RecordFieldType.TIMESTAMP.getDataType();
+            case Types.ARRAY:
+                return RecordFieldType.ARRAY.getDataType();
+            case Types.STRUCT:
+                return RecordFieldType.RECORD.getDataType();
+            default:
+                return null;
         }
     }
 

@@ -17,6 +17,7 @@
 package org.apache.nifi.controller.scheduling;
 
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
+import org.apache.nifi.annotation.lifecycle.OnShutdown;
 import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.annotation.lifecycle.OnUnscheduled;
 import org.apache.nifi.components.state.StateManager;
@@ -35,8 +36,10 @@ import org.apache.nifi.controller.ScheduledState;
 import org.apache.nifi.controller.SchedulingAgentCallback;
 import org.apache.nifi.controller.StandardProcessorNode;
 import org.apache.nifi.controller.exception.ProcessorInstantiationException;
+import org.apache.nifi.controller.repository.scheduling.ConnectableProcessContext;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
+import org.apache.nifi.controller.service.StandardConfigurationContext;
 import org.apache.nifi.encrypt.StringEncryptor;
 import org.apache.nifi.engine.FlowEngine;
 import org.apache.nifi.logging.ComponentLog;
@@ -177,6 +180,23 @@ public final class StandardProcessScheduler implements ProcessScheduler {
     }
 
     @Override
+    public void shutdownReportingTask(final ReportingTaskNode reportingTask) {
+        final ConfigurationContext configContext = reportingTask.getConfigurationContext();
+        try (final NarCloseable narCloseable = NarCloseable.withComponentNarLoader(flowController.getExtensionManager(), reportingTask.getReportingTask().getClass(), reportingTask.getIdentifier())) {
+            ReflectionUtils.quietlyInvokeMethodsWithAnnotation(OnShutdown.class, reportingTask.getReportingTask(), configContext);
+        }
+    }
+
+    @Override
+    public void shutdownControllerService(final ControllerServiceNode serviceNode, final ControllerServiceProvider controllerServiceProvider) {
+        final Class<?> serviceImplClass = serviceNode.getControllerServiceImplementation().getClass();
+        try (final NarCloseable narCloseable = NarCloseable.withComponentNarLoader(flowController.getExtensionManager(), serviceImplClass, serviceNode.getIdentifier())) {
+            final ConfigurationContext configContext = new StandardConfigurationContext(serviceNode, controllerServiceProvider, null, flowController.getVariableRegistry());
+            ReflectionUtils.quietlyInvokeMethodsWithAnnotation(OnShutdown.class, serviceNode.getControllerServiceImplementation(), configContext);
+        }
+    }
+
+    @Override
     public void schedule(final ReportingTaskNode taskNode) {
         final LifecycleState lifecycleState = getLifecycleState(requireNonNull(taskNode), true);
         if (lifecycleState.isScheduled()) {
@@ -231,7 +251,7 @@ public final class StandardProcessScheduler implements ProcessScheduler {
 
                     LOG.error("Failed to invoke the On-Scheduled Lifecycle methods of {} due to {}; administratively yielding this "
                             + "ReportingTask and will attempt to schedule it again after {}",
-                            new Object[]{reportingTask, e.toString(), administrativeYieldDuration}, e);
+                            reportingTask, e.toString(), administrativeYieldDuration, e);
 
 
                     try (final NarCloseable x = NarCloseable.withComponentNarLoader(flowController.getExtensionManager(), reportingTask.getClass(), reportingTask.getIdentifier())) {

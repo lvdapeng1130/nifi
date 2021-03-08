@@ -111,8 +111,9 @@ public class PutElasticsearchHttp extends AbstractElasticsearchHttpProcessor {
     public static final PropertyDescriptor TYPE = new PropertyDescriptor.Builder()
             .name("put-es-type")
             .displayName("Type")
-            .description("The type of this document (used by Elasticsearch for indexing and searching)")
-            .required(true)
+            .description("The type of this document (required by Elasticsearch versions < 7.0 for indexing and searching). "
+                    + "This must be unset or '_doc' for Elasticsearch 7.0+.")
+            .required(false)
             .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
             .addValidator(StandardValidators.NON_EMPTY_EL_VALIDATOR)
             .build();

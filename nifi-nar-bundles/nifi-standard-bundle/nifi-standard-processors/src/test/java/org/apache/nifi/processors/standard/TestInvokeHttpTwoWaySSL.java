@@ -17,8 +17,16 @@
 
 package org.apache.nifi.processors.standard;
 
-import org.apache.commons.lang3.SystemUtils;
-import org.junit.Assume;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import javax.net.ssl.SSLContext;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.nifi.security.util.ClientAuth;
+import org.apache.nifi.security.util.KeyStoreUtils;
+import org.apache.nifi.security.util.SslContextFactory;
+import org.apache.nifi.security.util.TlsConfiguration;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
 /**
@@ -28,27 +36,48 @@ import org.junit.BeforeClass;
  */
 public class TestInvokeHttpTwoWaySSL extends TestInvokeHttpSSL {
 
+    private static TlsConfiguration serverConfig;
+    private static SSLContext clientSslContext;
 
     @BeforeClass
     public static void beforeClass() throws Exception {
-        Assume.assumeTrue("Test only runs on *nix", !SystemUtils.IS_OS_WINDOWS);
-        // useful for verbose logging output
-        // don't commit this with this property enabled, or any 'mvn test' will be really verbose
-        // System.setProperty("org.slf4j.simpleLogger.log.nifi.processors.standard", "debug");
+        // generate new keystore and truststore
+        serverConfig = KeyStoreUtils.createTlsConfigAndNewKeystoreTruststore();
 
-        // create the SSL properties, which basically store keystore / trustore information
-        // this is used by the StandardSSLContextService and the Jetty Server
-        serverSslProperties = createServerSslProperties(true);
-        sslProperties = createClientSslProperties(true);
+        final SSLContext serverContext = SslContextFactory.createSslContext(serverConfig);
+        configureServer(serverContext, ClientAuth.REQUIRED);
+        clientSslContext = SslContextFactory.createSslContext(serverConfig);
+    }
 
-        // create a Jetty server on a random port
-        server = createServer();
-        server.startServer();
+    @AfterClass
+    public static void afterClass() throws Exception {
+        if (serverConfig != null) {
+            try {
+                if (StringUtils.isNotBlank(serverConfig.getKeystorePath())) {
+                    Files.deleteIfExists(Paths.get(serverConfig.getKeystorePath()));
+                }
+            } catch (IOException e) {
+                throw new IOException("There was an error deleting a keystore: " + e.getMessage(), e);
+            }
 
-        // Allow time for the server to start
-        Thread.sleep(500);
-        // this is the base url with the random port
-        url = server.getSecureUrl();
+            try {
+                if (StringUtils.isNotBlank(serverConfig.getTruststorePath())) {
+                    Files.deleteIfExists(Paths.get(serverConfig.getTruststorePath()));
+                }
+            } catch (IOException e) {
+                throw new IOException("There was an error deleting a truststore: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    @Override
+    protected SSLContext getClientSslContext() {
+        return clientSslContext;
+    }
+
+    @Override
+    protected TlsConfiguration getClientConfiguration() {
+        return serverConfig;
     }
 
 }

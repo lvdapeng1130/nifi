@@ -18,7 +18,7 @@
     <parent>
         <groupId>org.apache.nifi</groupId>
         <artifactId>nifi-framework</artifactId>
-        <version>1.13.0-SNAPSHOT</version>
+        <version>1.13.1-SNAPSHOT</version>
     </parent>
     <artifactId>nifi-resources</artifactId>
     <packaging>pom</packaging>
@@ -126,7 +126,7 @@
         <nifi.components.status.snapshot.frequency>1 min</nifi.components.status.snapshot.frequency>
 
         <!-- nifi.properties: web properties -->
-        <nifi.web.http.host />
+        <nifi.web.http.host>127.0.0.1</nifi.web.http.host>
         <nifi.web.http.port>8080</nifi.web.http.port>
         <nifi.web.http.network.interface.default />
         <nifi.web.https.host />
@@ -164,6 +164,7 @@
         <nifi.security.user.oidc.preferred.jwsalgorithm />
         <nifi.security.user.oidc.additional.scopes />
         <nifi.security.user.oidc.claim.identifying.user />
+        <nifi.security.user.oidc.fallback.claims.identifying.user />
 
         <!-- nifi.properties: apache knox -->
         <nifi.security.user.knox.url />
@@ -172,10 +173,10 @@
         <nifi.security.user.knox.audiences />
 
         <!-- nifi.properties: saml -->
-        <nifi.security.user.saml.idp.metadata.url/>
-        <nifi.security.user.saml.sp.entity.id/>
-        <nifi.security.user.saml.identity.attribute.name/>
-        <nifi.security.user.saml.group.attribute.name/>
+        <nifi.security.user.saml.idp.metadata.url />
+        <nifi.security.user.saml.sp.entity.id />
+        <nifi.security.user.saml.identity.attribute.name />
+        <nifi.security.user.saml.group.attribute.name />
         <nifi.security.user.saml.metadata.signing.enabled>false</nifi.security.user.saml.metadata.signing.enabled>
         <nifi.security.user.saml.request.signing.enabled>false</nifi.security.user.saml.request.signing.enabled>
         <nifi.security.user.saml.want.assertions.signed>true</nifi.security.user.saml.want.assertions.signed>

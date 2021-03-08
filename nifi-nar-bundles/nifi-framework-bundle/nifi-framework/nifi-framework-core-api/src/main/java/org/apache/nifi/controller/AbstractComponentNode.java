@@ -25,12 +25,14 @@ import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.components.validation.DisabledServiceValidationResult;
+import org.apache.nifi.components.validation.EnablingServiceValidationResult;
 import org.apache.nifi.components.validation.ValidationState;
 import org.apache.nifi.components.validation.ValidationStatus;
 import org.apache.nifi.components.validation.ValidationTrigger;
 import org.apache.nifi.controller.service.ControllerServiceDisabledException;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
+import org.apache.nifi.controller.service.ControllerServiceState;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.nar.NarCloseable;
 import org.apache.nifi.parameter.ExpressionLanguageAgnosticParameterParser;
@@ -291,7 +293,7 @@ public abstract class AbstractComponentNode implements ComponentNode {
                     final ParameterReference reference = referenceList.get(0);
                     if (reference.getStartOffset() != 0 || reference.getEndOffset() != value.length() - 1) {
                         throw new IllegalArgumentException("The property '" + descriptor.getDisplayName() + "' is a sensitive property so it can reference a Parameter only if there is no other " +
-                                "context around the value. For instance, the value '#{abc}' is allowed but 'password#{abc}' is not allowed.");
+                            "context around the value. For instance, the value '#{abc}' is allowed but 'password#{abc}' is not allowed.");
                     }
 
                     final ParameterContext parameterContext = getParameterContext();
@@ -309,7 +311,7 @@ public abstract class AbstractComponentNode implements ComponentNode {
                         final Optional<Parameter> parameter = parameterContext.getParameter(reference.getParameterName());
                         if (parameter.isPresent() && parameter.get().getDescriptor().isSensitive()) {
                             throw new IllegalArgumentException("The property '" + descriptor.getDisplayName() + "' cannot reference Parameter '" + parameter.get().getDescriptor().getName()
-                                    + "' because Sensitive Parameters may only be referenced by Sensitive Properties.");
+                                + "' because Sensitive Parameters may only be referenced by Sensitive Properties.");
                         }
                     }
                 }
@@ -318,7 +320,7 @@ public abstract class AbstractComponentNode implements ComponentNode {
             if (descriptor.getControllerServiceDefinition() != null) {
                 if (!referenceList.isEmpty()) {
                     throw new IllegalArgumentException("The property '" + descriptor.getDisplayName() + "' cannot reference a Parameter because the property is a Controller Service reference. " +
-                            "Allowing Controller Service references to make use of Parameters could result in security issues and a poor user experience. As a result, this is not allowed.");
+                        "Allowing Controller Service references to make use of Parameters could result in security issues and a poor user experience. As a result, this is not allowed.");
                 }
             }
         }
@@ -617,7 +619,7 @@ public abstract class AbstractComponentNode implements ComponentNode {
         } catch (final ControllerServiceDisabledException e) {
             getLogger().debug("Failed to perform validation due to " + e, e);
             return Collections.singleton(
-                    new DisabledServiceValidationResult("Component", e.getControllerServiceId(), "performing validation depends on referencing a Controller Service that is currently disabled"));
+                new DisabledServiceValidationResult("Component", e.getControllerServiceId(), "performing validation depends on referencing a Controller Service that is currently disabled"));
         } catch (final Exception e) {
             // We don't want to log this as an error because we will return a ValidationResult that is
             // invalid. However, we do want to make the stack trace available if needed, so we log it at
@@ -630,10 +632,10 @@ public abstract class AbstractComponentNode implements ComponentNode {
         }
 
         return Collections.singleton(new ValidationResult.Builder()
-                .subject("Component")
-                .valid(false)
-                .explanation("Failed to perform validation due to " + failureCause)
-                .build());
+            .subject("Component")
+            .valid(false)
+            .explanation("Failed to perform validation due to " + failureCause)
+            .build());
     }
 
     private List<ValidationResult> validateParameterReferences(final ValidationContext validationContext) {
@@ -655,11 +657,11 @@ public abstract class AbstractComponentNode implements ComponentNode {
 
             if (parameterContext == null && !referencedParameters.isEmpty()) {
                 results.add(new ValidationResult.Builder()
-                        .subject(propertyDescriptor.getDisplayName())
-                        .valid(false)
-                        .explanation(assignedToProcessGroup ? "Property references one or more Parameters but no Parameter Context is currently set on the Process Group"
-                                : "Property references one or more Parameters, but Parameters may be referenced only by Processors and Controller Services that reside within a Process Group.")
-                        .build());
+                    .subject(propertyDescriptor.getDisplayName())
+                    .valid(false)
+                    .explanation(assignedToProcessGroup ? "Property references one or more Parameters but no Parameter Context is currently set on the Process Group"
+                        : "Property references one or more Parameters, but Parameters may be referenced only by Processors and Controller Services that reside within a Process Group.")
+                    .build());
 
                 continue;
             }
@@ -667,20 +669,10 @@ public abstract class AbstractComponentNode implements ComponentNode {
             for (final String paramName : referencedParameters) {
                 if (!validationContext.isParameterDefined(paramName)) {
                     results.add(new ValidationResult.Builder()
-                            .subject(propertyDescriptor.getDisplayName())
-                            .valid(false)
-                            .explanation("Property references Parameter '" + paramName + "' but the currently selected Parameter Context does not have a Parameter with that name")
-                            .build());
-
-                    continue;
-                }
-
-                if (!validationContext.isParameterSet(paramName)) {
-                    results.add(new ValidationResult.Builder()
-                            .subject(propertyDescriptor.getDisplayName())
-                            .valid(false)
-                            .explanation("Property references Parameter '" + paramName + "' but the currently selected Parameter Context does not have a value set for that Parameter")
-                            .build());
+                        .subject(propertyDescriptor.getDisplayName())
+                        .valid(false)
+                        .explanation("Property references Parameter '" + paramName + "' but the currently selected Parameter Context does not have a Parameter with that name")
+                        .build());
                 }
             }
         }
@@ -709,7 +701,7 @@ public abstract class AbstractComponentNode implements ComponentNode {
             final ControllerServiceNode controllerServiceNode = getControllerServiceProvider().getControllerServiceNode(controllerServiceId);
             if (controllerServiceNode == null) {
                 final ValidationResult result = createInvalidResult(controllerServiceId, descriptor.getDisplayName(),
-                        "Invalid Controller Service: " + controllerServiceId + " is not a valid Controller Service Identifier");
+                    "Invalid Controller Service: " + controllerServiceId + " is not a valid Controller Service Identifier");
 
                 validationResults.add(result);
                 continue;
@@ -723,6 +715,8 @@ public abstract class AbstractComponentNode implements ComponentNode {
 
             if (!controllerServiceNode.isActive()) {
                 validationResults.add(new DisabledServiceValidationResult(descriptor.getDisplayName(), controllerServiceId));
+            } else if (ControllerServiceState.ENABLING == controllerServiceNode.getState()) {
+                validationResults.add(new EnablingServiceValidationResult(descriptor.getDisplayName(), controllerServiceId));
             }
         }
 
@@ -749,13 +743,21 @@ public abstract class AbstractComponentNode implements ComponentNode {
         }
         final BundleCoordinate controllerServiceApiCoordinate = controllerServiceApiBundle.getBundleDetails().getCoordinate();
 
-        final Bundle controllerServiceBundle = extensionManager.getBundle(controllerServiceNode.getBundleCoordinate());
+        Bundle controllerServiceBundle = extensionManager.getBundle(controllerServiceNode.getBundleCoordinate());
+        final boolean matchesApiByBundleCoordinates;
         if (controllerServiceBundle == null) {
-            return createInvalidResult(serviceId, propertyName, "Unable to find bundle for coordinate " + controllerServiceNode.getBundleCoordinate());
-        }
-        final BundleCoordinate controllerServiceCoordinate = controllerServiceBundle.getBundleDetails().getCoordinate();
+            final List<Bundle> possibleBundles = extensionManager.getBundles(controllerServiceNode.getControllerServiceImplementation().getClass().getName());
+            if (possibleBundles.size() != 1) {
+                return createInvalidResult(serviceId, propertyName, "Unable to find bundle for coordinate " + controllerServiceNode.getBundleCoordinate());
+            }
 
-        final boolean matchesApiByBundleCoordinates = matchesApiBundleCoordinates(extensionManager, controllerServiceBundle, controllerServiceApiCoordinate);
+            controllerServiceBundle = possibleBundles.get(0);
+            matchesApiByBundleCoordinates = false;
+        } else {
+            matchesApiByBundleCoordinates = matchesApiBundleCoordinates(extensionManager, controllerServiceBundle, controllerServiceApiCoordinate);
+        }
+
+        final BundleCoordinate controllerServiceCoordinate = controllerServiceBundle.getBundleDetails().getCoordinate();
         if (!matchesApiByBundleCoordinates) {
             final Class<? extends ControllerService> controllerServiceImplClass = controllerServiceNode.getControllerServiceImplementation().getClass();
             logger.debug("Comparing methods from service api '{}' against service implementation '{}'",
@@ -784,11 +786,11 @@ public abstract class AbstractComponentNode implements ComponentNode {
 
     private ValidationResult createInvalidResult(final String serviceId, final String propertyName, final String explanation) {
         return new ValidationResult.Builder()
-                .input(serviceId)
-                .subject(propertyName)
-                .valid(false)
-                .explanation(explanation)
-                .build();
+            .input(serviceId)
+            .subject(propertyName)
+            .valid(false)
+            .explanation(explanation)
+            .build();
     }
 
     /**
@@ -889,7 +891,7 @@ public abstract class AbstractComponentNode implements ComponentNode {
                     }
                 } else {
                     logger.debug("Parameter Context updated, and property {} of {} does reference the updated Parameters. However, the overall property value remained unchanged so will not call " +
-                            "onPropertyModified().", propertyDescriptor, this);
+                        "onPropertyModified().", propertyDescriptor, this);
                 }
             }
         }
@@ -920,10 +922,10 @@ public abstract class AbstractComponentNode implements ComponentNode {
                     parameterDescriptor = optionalParameter.get().getDescriptor();
                 } else {
                     parameterDescriptor = new ParameterDescriptor.Builder()
-                            .name(parameterName)
-                            .description("")
-                            .sensitive(true)
-                            .build();
+                        .name(parameterName)
+                        .description("")
+                        .sensitive(true)
+                        .build();
                 }
 
                 final Parameter updatedParameter = new Parameter(parameterDescriptor, parameterUpdate.getPreviousValue());
@@ -1037,8 +1039,8 @@ public abstract class AbstractComponentNode implements ComponentNode {
         }
 
         final Set<String> ignoredServiceIds = servicesToIgnore.stream()
-                .map(ControllerServiceNode::getIdentifier)
-                .collect(Collectors.toSet());
+            .map(ControllerServiceNode::getIdentifier)
+            .collect(Collectors.toSet());
 
         final List<ValidationResult> retainedValidationErrors = new ArrayList<>();
         for (final ValidationResult result : validationErrors) {

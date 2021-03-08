@@ -108,6 +108,27 @@ public class TestPutElasticsearchHttp {
     }
 
     @Test
+    public void testPutElasticSearchOnTriggerIndex_withoutType() throws IOException {
+        runner = TestRunners.newTestRunner(new PutElasticsearchTestProcessor(false)); // no failures
+        runner.setProperty(AbstractElasticsearchHttpProcessor.ES_URL, "http://127.0.0.1:9200");
+
+        runner.setProperty(PutElasticsearchHttp.INDEX, "doc");
+        runner.removeProperty(PutElasticsearchHttp.TYPE);
+        runner.setProperty(PutElasticsearchHttp.BATCH_SIZE, "1");
+        runner.setProperty(PutElasticsearchHttp.ID_ATTRIBUTE, "doc_id");
+
+        runner.enqueue(docExample, new HashMap<String, String>() {{
+            put("doc_id", "28039652140");
+        }});
+        runner.run(1, true, true);
+
+        runner.assertAllFlowFilesTransferred(PutElasticsearchHttp.REL_SUCCESS, 1);
+        final MockFlowFile out = runner.getFlowFilesForRelationship(PutElasticsearchHttp.REL_SUCCESS).get(0);
+        assertNotNull(out);
+        out.assertAttributeEquals("doc_id", "28039652140");
+    }
+
+    @Test
     public void testPutElasticSearchOnTriggerUpdate() throws IOException {
         runner = TestRunners.newTestRunner(new PutElasticsearchTestProcessor(false)); // no failures
         runner.setProperty(AbstractElasticsearchHttpProcessor.ES_URL, "http://127.0.0.1:9200");
@@ -201,8 +222,8 @@ public class TestPutElasticsearchHttp {
         runner = TestRunners.newTestRunner(new PutElasticsearchTestProcessor(false)); // no failures
         runner.setProperty(AbstractElasticsearchHttpProcessor.ES_URL, "http://127.0.0.1:9200");
 
-        runner.setProperty(PutElasticsearchHttp.INDEX, "doc");
         runner.assertNotValid();
+        runner.setProperty(PutElasticsearchHttp.INDEX, "doc");
         runner.setProperty(PutElasticsearchHttp.TYPE, "status");
         runner.setProperty(PutElasticsearchHttp.BATCH_SIZE, "1");
         runner.assertValid();
@@ -315,9 +336,20 @@ public class TestPutElasticsearchHttp {
         runner = TestRunners.newTestRunner(new PutElasticsearchTestProcessor(false)); // no failures
         runner.setProperty(AbstractElasticsearchHttpProcessor.ES_URL, "http://127.0.0.1:9200");
 
-        runner.setProperty(PutElasticsearchHttp.INDEX, "doc");
         runner.assertNotValid();
+        runner.setProperty(PutElasticsearchHttp.INDEX, "doc");
+        runner.setProperty(PutElasticsearchHttp.TYPE, "");
+        runner.assertNotValid();
+        runner.setProperty(PutElasticsearchHttp.TYPE, " ");
+        runner.assertValid();
+        runner.removeProperty(PutElasticsearchHttp.TYPE);
+        runner.assertValid();
         runner.setProperty(PutElasticsearchHttp.TYPE, "status");
+        runner.assertValid();
+        runner.setProperty(PutElasticsearchHttp.TYPE, "${type}");
+        runner.assertValid();
+        runner.setProperty(PutElasticsearchHttp.TYPE, "_doc");
+        runner.assertValid();
         runner.setProperty(PutElasticsearchHttp.BATCH_SIZE, "1");
         runner.assertValid();
         runner.setProperty(PutElasticsearchHttp.INDEX_OP, "index");

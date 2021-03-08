@@ -45,8 +45,20 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
@@ -96,8 +108,8 @@ public class StandardProcessorTestRunner implements TestRunner {
         this.idGenerator = new AtomicLong(0L);
         this.sharedState = new SharedSessionState(processor, idGenerator);
         this.flowFileQueue = sharedState.getFlowFileQueue();
-        this.sessionFactory = new MockSessionFactory(sharedState, processor, enforceReadStreamsClosed);
         this.processorStateManager = new MockStateManager(processor);
+        this.sessionFactory = new MockSessionFactory(sharedState, processor, enforceReadStreamsClosed, processorStateManager);
         this.variableRegistry = new MockVariableRegistry();
 
         this.context = new MockProcessContext(processor, processorName, processorStateManager, variableRegistry);
@@ -121,7 +133,7 @@ public class StandardProcessorTestRunner implements TestRunner {
     @Override
     public void enforceReadStreamsClosed(final boolean enforce) {
         enforceReadStreamsClosed = enforce;
-        this.sessionFactory = new MockSessionFactory(sharedState, processor, enforceReadStreamsClosed);
+        this.sessionFactory = new MockSessionFactory(sharedState, processor, enforceReadStreamsClosed, processorStateManager);
     }
 
     @Override
@@ -419,7 +431,7 @@ public class StandardProcessorTestRunner implements TestRunner {
 
     @Override
     public MockFlowFile enqueue(final InputStream data, final Map<String, String> attributes) {
-        final MockProcessSession session = new MockProcessSession(new SharedSessionState(processor, idGenerator), processor, enforceReadStreamsClosed);
+        final MockProcessSession session = new MockProcessSession(new SharedSessionState(processor, idGenerator), processor, enforceReadStreamsClosed, processorStateManager);
         MockFlowFile flowFile = session.create();
         flowFile = session.importFrom(data, flowFile);
         flowFile = session.putAllAttributes(flowFile, attributes);
@@ -445,13 +457,6 @@ public class StandardProcessorTestRunner implements TestRunner {
             flowFiles.addAll(session.getFlowFilesForRelationship(relationship));
         }
 
-        Collections.sort(flowFiles, new Comparator<MockFlowFile>() {
-            @Override
-            public int compare(final MockFlowFile o1, final MockFlowFile o2) {
-                return Long.compare(o1.getCreationTime(), o2.getCreationTime());
-            }
-        });
-
         return flowFiles;
     }
 
@@ -461,13 +466,6 @@ public class StandardProcessorTestRunner implements TestRunner {
         for (final MockProcessSession session : sessionFactory.getCreatedSessions()) {
             flowFiles.addAll(session.getPenalizedFlowFiles());
         }
-
-        Collections.sort(flowFiles, new Comparator<MockFlowFile>() {
-            @Override
-            public int compare(final MockFlowFile o1, final MockFlowFile o2) {
-                return Long.compare(o1.getCreationTime(), o2.getCreationTime());
-            }
-        });
 
         return flowFiles;
     }

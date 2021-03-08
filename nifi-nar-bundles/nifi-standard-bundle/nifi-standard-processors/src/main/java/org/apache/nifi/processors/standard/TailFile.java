@@ -598,7 +598,7 @@ public class TailFile extends AbstractProcessor {
                 try {
                     final List<String> filesToTail = lookup(context);
                     final Scope scope = getStateScope(context);
-                    final StateMap stateMap = context.getStateManager().getState(scope);
+                    final StateMap stateMap = session.getState(scope);
                     initStates(filesToTail, stateMap.toMap(), false, context.getProperty(START_POSITION).getValue());
                 } catch (IOException e) {
                     getLogger().error("Exception raised while attempting to recover state about where the tailing last left off", e);
@@ -769,7 +769,7 @@ public class TailFile extends AbstractProcessor {
             // no data to consume so rather than continually running, yield to allow other processors to use the thread.
             getLogger().debug("No data to consume; created no FlowFiles");
             tfo.setState(new TailFileState(tailFile, file, reader, position, timestamp, length, checksum, state.getBuffer()));
-            persistState(tfo, context);
+            persistState(tfo, session, context);
             context.yield();
             return;
         }
@@ -782,7 +782,7 @@ public class TailFile extends AbstractProcessor {
 
         final FileChannel fileReader = reader;
         final AtomicLong positionHolder = new AtomicLong(position);
-        final Boolean reReadOnNul = context.getProperty(REREAD_ON_NUL).asBoolean();
+        final boolean reReadOnNul = context.getProperty(REREAD_ON_NUL).asBoolean();
 
         AtomicReference<NulCharacterEncounteredException> abort = new AtomicReference<>();
         flowFile = session.write(flowFile, new OutputStreamCallback() {
@@ -799,7 +799,19 @@ public class TailFile extends AbstractProcessor {
 
         if (abort.get() != null) {
             session.remove(flowFile);
-            tfo.setState(new TailFileState(tailFile, file, reader, position, timestamp, length, checksum, state.getBuffer()));
+            final long newPosition = positionHolder.get();
+            try {
+                reader.position(newPosition);
+            } catch (IOException ex) {
+                getLogger().warn("Couldn't reposition the reader for {} due to {}", new Object[]{ file, ex }, ex);
+                try {
+                    reader.close();
+                } catch (IOException ex2) {
+                    getLogger().warn("Failed to close reader for {} due to {}", new Object[]{ file, ex2 }, ex2);
+                }
+                reader = null;
+            }
+            tfo.setState(new TailFileState(tailFile, file, reader, newPosition, timestamp, length, checksum, state.getBuffer()));
             throw abort.get();
         }
 
@@ -842,9 +854,11 @@ public class TailFile extends AbstractProcessor {
         // Create a new state object to represent our current position, timestamp, etc.
         tfo.setState(new TailFileState(tailFile, file, reader, position, timestamp, length, checksum, state.getBuffer()));
 
-        // We must commit session before persisting state in order to avoid data loss on restart
-        session.commit();
-        persistState(tfo, context);
+        persistState(tfo, session, context);
+    }
+
+    private long readLines(final FileChannel reader, final ByteBuffer buffer, final OutputStream out, final Checksum checksum, Boolean reReadOnNul) throws IOException {
+        return readLines(reader, buffer, out, checksum, reReadOnNul, false);
     }
 
     /**
@@ -861,11 +875,14 @@ public class TailFile extends AbstractProcessor {
      * temporary values and a NulCharacterEncounteredException is thrown.
      * This allows the caller to re-attempt a read from the same position.
      * If set to 'false' these characters will be treated as regular content.
+     * @param readFully If set to 'true' the last chunk of bytes after the last whole line
+     * will be also written to the OutputStream
      *
      * @return The new position after the lines have been read
      * @throws java.io.IOException if an I/O error occurs.
      */
-    private long readLines(final FileChannel reader, final ByteBuffer buffer, final OutputStream out, final Checksum checksum, Boolean reReadOnNul) throws IOException {
+    private long readLines(final FileChannel reader, final ByteBuffer buffer, final OutputStream out, final Checksum checksum,
+                           Boolean reReadOnNul, final boolean readFully) throws IOException {
         getLogger().debug("Reading lines starting at position {}", new Object[]{reader.position()});
 
         try (final ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
@@ -877,7 +894,7 @@ public class TailFile extends AbstractProcessor {
             boolean seenCR = false;
             buffer.clear();
 
-            while (((num = reader.read(buffer)) != -1)) {
+            while ((num = reader.read(buffer)) != -1) {
                 buffer.flip();
 
                 for (int i = 0; i < num; i++) {
@@ -887,14 +904,7 @@ public class TailFile extends AbstractProcessor {
                         case '\n': {
                             baos.write(ch);
                             seenCR = false;
-                            baos.writeTo(out);
-                            final byte[] baosBuffer = baos.toByteArray();
-                            checksum.update(baosBuffer, 0, baos.size());
-                            if (getLogger().isTraceEnabled()) {
-                                getLogger().trace("Checksum updated to {}", new Object[]{checksum.getValue()});
-                            }
-
-                            baos.reset();
+                            flushByteArrayOutputStream(baos, out, checksum);
                             rePos = pos + i + 1;
                             linesRead++;
                             break;
@@ -912,15 +922,8 @@ public class TailFile extends AbstractProcessor {
                         default: {
                             if (seenCR) {
                                 seenCR = false;
-                                baos.writeTo(out);
-                                final byte[] baosBuffer = baos.toByteArray();
-                                checksum.update(baosBuffer, 0, baos.size());
-                                if (getLogger().isTraceEnabled()) {
-                                    getLogger().trace("Checksum updated to {}", new Object[]{checksum.getValue()});
-                                }
-
+                                flushByteArrayOutputStream(baos, out, checksum);
                                 linesRead++;
-                                baos.reset();
                                 baos.write(ch);
                                 rePos = pos + i;
                             } else {
@@ -933,6 +936,11 @@ public class TailFile extends AbstractProcessor {
                 pos = reader.position();
             }
 
+            if (readFully) {
+                flushByteArrayOutputStream(baos, out, checksum);
+                rePos = reader.position();
+            }
+
             if (rePos < reader.position()) {
                 getLogger().debug("Read {} lines; repositioning reader from {} to {}", new Object[]{linesRead, pos, rePos});
                 reader.position(rePos); // Ensure we can re-read if necessary
@@ -940,6 +948,16 @@ public class TailFile extends AbstractProcessor {
 
             return rePos;
         }
+    }
+
+    private void flushByteArrayOutputStream(final ByteArrayOutputStream baos, final OutputStream out, final Checksum checksum) throws IOException {
+        baos.writeTo(out);
+        final byte[] baosBuffer = baos.toByteArray();
+        checksum.update(baosBuffer, 0, baos.size());
+        if (getLogger().isTraceEnabled()) {
+            getLogger().trace("Checksum updated to {}", checksum.getValue());
+        }
+        baos.reset();
     }
 
     /**
@@ -1024,13 +1042,13 @@ public class TailFile extends AbstractProcessor {
         return Scope.LOCAL;
     }
 
-    private void persistState(final TailFileObject tfo, final ProcessContext context) {
-        persistState(tfo.getState().toStateMap(tfo.getFilenameIndex()), context);
+    private void persistState(final TailFileObject tfo, final ProcessSession session, final ProcessContext context) {
+        persistState(tfo.getState().toStateMap(tfo.getFilenameIndex()), session, context);
     }
 
-    private void persistState(final Map<String, String> state, final ProcessContext context) {
+    private void persistState(final Map<String, String> state, final ProcessSession session, final ProcessContext context) {
         try {
-            StateMap oldState = context.getStateManager().getState(getStateScope(context));
+            final StateMap oldState = session.getState(getStateScope(context));
             Map<String, String> updatedState = new HashMap<String, String>();
 
             for(String key : oldState.toMap().keySet()) {
@@ -1047,7 +1065,8 @@ public class TailFile extends AbstractProcessor {
             }
 
             updatedState.putAll(state);
-            context.getStateManager().setState(updatedState, getStateScope(context));
+
+            session.setState(updatedState, getStateScope(context));
         } catch (final IOException e) {
             getLogger().warn("Failed to store state due to {}; some data may be duplicated on restart of NiFi", new Object[]{e});
         }
@@ -1116,7 +1135,7 @@ public class TailFile extends AbstractProcessor {
             // a file when we stopped running, then that file that we were reading from should be the first file in this list,
             // assuming that the file still exists on the file system.
             final List<File> rolledOffFiles = getRolledOffFiles(context, timestamp, tailFile);
-            return recoverRolledFiles(context, session, tailFile, rolledOffFiles, expectedChecksum, timestamp, position);
+            return recoverRolledFiles(context, session, tailFile, rolledOffFiles, expectedChecksum, position);
         } catch (final IOException e) {
             getLogger().error("Failed to recover files that have rolled over due to {}", new Object[]{e});
             return false;
@@ -1136,9 +1155,6 @@ public class TailFile extends AbstractProcessor {
      * FlowFile creation and content.
      * @param expectedChecksum the checksum value that is expected for the
      * oldest file from offset 0 through &lt;position&gt;.
-     * @param timestamp the latest Last Modfiied Timestamp that has been
-     * consumed. Any data that was written before this data will not be
-     * ingested.
      * @param position the byte offset in the file being tailed, where tailing
      * last left off.
      *
@@ -1146,7 +1162,7 @@ public class TailFile extends AbstractProcessor {
      * otherwise
      */
     private boolean recoverRolledFiles(final ProcessContext context, final ProcessSession session, final String tailFile, final List<File> rolledOffFiles, final Long expectedChecksum,
-            final long timestamp, final long position) {
+            final long position) {
         try {
             getLogger().debug("Recovering Rolled Off Files; total number of files rolled off = {}", new Object[]{rolledOffFiles.size()});
             TailFileObject tfo = states.get(tailFile);
@@ -1161,8 +1177,9 @@ public class TailFile extends AbstractProcessor {
                 final File firstFile = rolledOffFiles.get(0);
 
                 final long startNanos = System.nanoTime();
+                final Boolean reReadOnNul = context.getProperty(REREAD_ON_NUL).asBoolean();
                 if (position > 0) {
-                    try (final InputStream fis = new FileInputStream(firstFile);
+                    try (final FileInputStream fis = new FileInputStream(firstFile);
                             final CheckedInputStream in = new CheckedInputStream(fis, new CRC32())) {
                         StreamUtils.copy(in, new NullOutputStream(), position);
 
@@ -1173,7 +1190,15 @@ public class TailFile extends AbstractProcessor {
                             // This is the same file that we were reading when we shutdown. Start reading from this point on.
                             rolledOffFiles.remove(0);
                             FlowFile flowFile = session.create();
-                            flowFile = session.importFrom(in, flowFile);
+
+                            try {
+                                flowFile = session.write(flowFile,
+                                        out -> readLines(fis.getChannel(), ByteBuffer.allocate(65536), out, new CRC32(), reReadOnNul, true));
+                            } catch (NulCharacterEncounteredException ncee) {
+                                rolledOffFiles.add(0, firstFile);
+                                session.remove(flowFile);
+                                throw ncee;
+                            }
                             if (flowFile.getSize() == 0L) {
                                 session.remove(flowFile);
                                 // use a timestamp of lastModified() + 1 so that we do not ingest this file again.
@@ -1195,9 +1220,7 @@ public class TailFile extends AbstractProcessor {
                                 cleanup();
                                 tfo.setState(new TailFileState(tailFile, null, null, 0L, firstFile.lastModified() + 1L, firstFile.length(), null, tfo.getState().getBuffer()));
 
-                                // must ensure that we do session.commit() before persisting state in order to avoid data loss.
-                                session.commit();
-                                persistState(tfo, context);
+                                persistState(tfo, session, context);
                             }
                         } else {
                             getLogger().debug("Checksum for {} did not match expected checksum. Checksum for file was {} but expected {}. Will consume entire file",
@@ -1255,9 +1278,7 @@ public class TailFile extends AbstractProcessor {
             tfo.setState(new TailFileState(context.getProperty(FILENAME).evaluateAttributeExpressions().getValue(), null, null, 0L, file.lastModified() + 1L, file.length(), null,
                     tfo.getState().getBuffer()));
 
-            // must ensure that we do session.commit() before persisting state in order to avoid data loss.
-            session.commit();
-            persistState(tfo, context);
+            persistState(tfo, session, context);
         }
 
         return tfo.getState();

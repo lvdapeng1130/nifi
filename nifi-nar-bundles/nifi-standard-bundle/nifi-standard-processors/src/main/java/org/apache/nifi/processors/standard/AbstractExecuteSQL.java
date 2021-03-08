@@ -91,6 +91,7 @@ public abstract class AbstractExecuteSQL extends AbstractProcessor {
             .displayName("SQL Pre-Query")
             .description("A semicolon-delimited list of queries executed before the main SQL query is executed. " +
                     "For example, set session properties before main query. " +
+                    "It's possible to include semicolons in the statements themselves by escaping them with a backslash ('\\;'). " +
                     "Results/outputs from these queries will be suppressed if there are no errors.")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
@@ -114,6 +115,7 @@ public abstract class AbstractExecuteSQL extends AbstractProcessor {
             .displayName("SQL Post-Query")
             .description("A semicolon-delimited list of queries executed after the main SQL query is executed. " +
                     "Example like setting session properties after main query. " +
+                    "It's possible to include semicolons in the statements themselves by escaping them with a backslash ('\\;'). " +
                     "Results/outputs from these queries will be suppressed if there are no errors.")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
@@ -355,8 +357,9 @@ public abstract class AbstractExecuteSQL extends AbstractProcessor {
 
                                 fragmentIndex++;
                             } catch (Exception e) {
-                                // Remove the result set flow file and propagate the exception
+                                // Remove any result set flow file(s) and propagate the exception
                                 session.remove(resultSetFF);
+                                session.remove(resultSetFlowFiles);
                                 if (e instanceof ProcessException) {
                                     throw (ProcessException) e;
                                 } else {
@@ -473,7 +476,8 @@ public abstract class AbstractExecuteSQL extends AbstractProcessor {
             return null;
         }
         final List<String> queries = new LinkedList<>();
-        for (String query : value.split(";")) {
+        for (String query : value.split("(?<!\\\\);")) {
+            query = query.replaceAll("\\\\;", ";");
             if (query.trim().length() > 0) {
                 queries.add(query.trim());
             }

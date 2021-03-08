@@ -110,7 +110,7 @@ public class StandardOidcIdentityProvider implements OidcIdentityProvider {
     public void initializeProvider() {
         // attempt to process the oidc configuration if configured
         if (!properties.isOidcEnabled()) {
-            logger.warn("The OIDC provider is not configured or enabled");
+            logger.debug("The OIDC provider is not configured or enabled");
             return;
         }
 
@@ -439,8 +439,16 @@ public class StandardOidcIdentityProvider implements OidcIdentityProvider {
                 identity = claimsSet.getStringClaim(EMAIL_CLAIM);
                 logger.info("The 'email' claim was present. Using that claim to avoid extra remote call");
             } else {
-                identity = retrieveIdentityFromUserInfoEndpoint(oidcTokens);
-                logger.info("Retrieved identity from UserInfo endpoint");
+                final List<String> fallbackClaims = properties.getOidcFallbackClaimsIdentifyingUser();
+                for (String fallbackClaim : fallbackClaims) {
+                    if (availableClaims.contains(fallbackClaim)) {
+                        identity = claimsSet.getStringClaim(fallbackClaim);
+                        break;
+                    }
+                }
+                if (StringUtils.isBlank(identity)) {
+                    identity = retrieveIdentityFromUserInfoEndpoint(oidcTokens);
+                }
             }
         }
 

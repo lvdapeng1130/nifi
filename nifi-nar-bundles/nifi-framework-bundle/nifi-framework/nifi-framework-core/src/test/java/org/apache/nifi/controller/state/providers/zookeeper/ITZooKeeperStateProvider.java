@@ -48,8 +48,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static org.apache.nifi.leader.election.TestSecureClientZooKeeperFactory.createAndStartServer;
-import static org.apache.nifi.leader.election.TestSecureClientZooKeeperFactory.createClientProperties;
+import static org.apache.nifi.leader.election.ITSecureClientZooKeeperFactory.createAndStartServer;
+import static org.apache.nifi.leader.election.ITSecureClientZooKeeperFactory.createSecureClientProperties;
 
 public class ITZooKeeperStateProvider extends AbstractTestStateProvider {
 
@@ -94,7 +94,7 @@ public class ITZooKeeperStateProvider extends AbstractTestStateProvider {
         zkServer = serverConnectionFactory.getZooKeeperServer();
 
         // Set up state provider (client) TLS properties, normally injected through StateProviderContext annotation
-        nifiProperties = createClientProperties(
+        nifiProperties = createSecureClientProperties(
                 clientPort,
                 Paths.get(CLIENT_KEYSTORE),
                 CLIENT_KEYSTORE_TYPE,

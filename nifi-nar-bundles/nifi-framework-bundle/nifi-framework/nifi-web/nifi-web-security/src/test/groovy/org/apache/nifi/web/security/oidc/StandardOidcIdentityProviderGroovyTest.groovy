@@ -412,22 +412,37 @@ class StandardOidcIdentityProviderGroovyTest extends GroovyTestCase {
     }
 
     @Test
+    void testConvertOIDCTokenToLoginAuthenticationTokenShouldHandleNoEmailClaimHasFallbackClaims() {
+        // Arrange
+        StandardOidcIdentityProvider soip = buildIdentityProviderWithMockTokenValidator(["getOidcClaimIdentifyingUser": "email", "getOidcFallbackClaimsIdentifyingUser": ["upn"] ])
+        String expectedUpn = "xxx@aaddomain";
+
+        OIDCTokenResponse mockResponse = mockOIDCTokenResponse(["email": null, "upn": expectedUpn])
+        logger.info("OIDC Token Response with no email and upn: ${mockResponse.dump()}")
+
+        String loginToken = soip.convertOIDCTokenToLoginAuthenticationToken(mockResponse)
+        logger.info("NiFi token create with upn: ${loginToken}")
+        // Assert
+        // Split JWT into components and decode Base64 to JSON
+        def (String contents, String expiration) = loginToken.tokenize("\\[\\]")
+        logger.info("Token contents: ${contents} | Expiration: ${expiration}")
+        assert contents =~ "LoginAuthenticationToken for ${expectedUpn} issued by https://accounts\\.issuer\\.com expiring at"
+    }
+
+    @Test
     void testConvertOIDCTokenToLoginAuthNTokenShouldHandleBlankIdentityAndNoEmailClaim() {
         // Arrange
-        StandardOidcIdentityProvider soip = buildIdentityProviderWithMockTokenValidator(["getOidcClaimIdentifyingUser": "non-existent-claim"])
+        StandardOidcIdentityProvider soip = buildIdentityProviderWithMockTokenValidator(["getOidcClaimIdentifyingUser": "non-existent-claim", "getOidcFallbackClaimsIdentifyingUser": [] ])
 
         OIDCTokenResponse mockResponse = mockOIDCTokenResponse(["email": null])
         logger.info("OIDC Token Response: ${mockResponse.dump()}")
 
         // Act
-        def msg = shouldFail(ConnectException) {
+        def msg = shouldFail(IOException) {
             String loginAuthenticationToken = soip.convertOIDCTokenToLoginAuthenticationToken(mockResponse)
             logger.info("Login authentication token: ${loginAuthenticationToken}")
         }
         logger.expected(msg)
-
-        // Assert
-        assert msg =~ "Connection refused|Remote host terminated the handshake"
     }
 
     @Test
