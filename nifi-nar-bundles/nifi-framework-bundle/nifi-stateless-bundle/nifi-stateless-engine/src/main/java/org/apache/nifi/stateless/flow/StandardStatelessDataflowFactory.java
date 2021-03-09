@@ -164,15 +164,14 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
                 .provenanceRepository(provenanceRepo)
                 .extensionRepository(extensionRepository)
                 .build();
-
-            final StatelessFlowManager flowManager = new StatelessFlowManager(flowFileEventRepo, parameterContextManager, statelessEngine, () -> true, sslContext);
+            final CounterRepository counterRepo = new StandardCounterRepository();
+            final StatelessFlowManager flowManager = new StatelessFlowManager(counterRepo,flowFileEventRepo, parameterContextManager, statelessEngine, () -> true, sslContext);
             final ControllerServiceProvider controllerServiceProvider = new StandardControllerServiceProvider(processScheduler, bulletinRepository, flowManager, extensionManager);
 
             final ProcessContextFactory rawProcessContextFactory = new StatelessProcessContextFactory(controllerServiceProvider, encryptor, stateManagerProvider);
             final ProcessContextFactory processContextFactory = new CachingProcessContextFactory(rawProcessContextFactory);
             contentRepo = new ByteArrayContentRepository();
             flowFileRepo = new StatelessFlowFileRepository();
-            final CounterRepository counterRepo = new StandardCounterRepository();
 
             final RepositoryContextFactory repositoryContextFactory = new StatelessRepositoryContextFactory(contentRepo, flowFileRepo, flowFileEventRepo,
                 counterRepo, provenanceRepo, stateManagerProvider);

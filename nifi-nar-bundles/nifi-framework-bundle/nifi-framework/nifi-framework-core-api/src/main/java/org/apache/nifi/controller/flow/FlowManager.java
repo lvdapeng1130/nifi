@@ -32,13 +32,11 @@ import org.apache.nifi.groups.RemoteProcessGroup;
 import org.apache.nifi.parameter.Parameter;
 import org.apache.nifi.parameter.ParameterContext;
 import org.apache.nifi.parameter.ParameterContextManager;
+import org.apache.nifi.reporting.bo.KyCounter;
 import org.apache.nifi.web.api.dto.FlowSnippetDTO;
 
 import java.net.URL;
-import java.util.Collection;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 public interface FlowManager {
     String ROOT_GROUP_ID_ALIAS = "root";
@@ -345,4 +343,8 @@ public interface FlowManager {
      * @throws IllegalStateException if any of the components is not in a state that it can be deleted.
      */
     void purge();
+
+    List<KyCounter> getKyCounters();
+
+    KyCounter resetKyCounter(final String identifier);
 }

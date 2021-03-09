@@ -71,6 +71,7 @@ import org.apache.nifi.remote.StandardPublicPort;
 import org.apache.nifi.remote.StandardRemoteProcessGroup;
 import org.apache.nifi.remote.TransferDirection;
 import org.apache.nifi.reporting.BulletinRepository;
+import org.apache.nifi.reporting.bo.KyCounter;
 import org.apache.nifi.util.FormatUtils;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.ReflectionUtils;
@@ -463,6 +464,16 @@ public class StandardFlowManager extends AbstractFlowManager implements FlowMana
         extensionManager.removeInstanceClassLoader(service.getIdentifier());
 
         logger.info("{} removed from Flow Controller", service);
+    }
+
+    @Override
+    public List<KyCounter> getKyCounters() {
+        return flowController.getKyCounters();
+    }
+
+    @Override
+    public KyCounter resetKyCounter(String identifier) {
+        return flowController.resetKyCounter(identifier);
     }
 
     public ControllerServiceNode createControllerService(final String type, final String id, final BundleCoordinate bundleCoordinate, final Set<URL> additionalUrls, final boolean firstTimeAdded,
