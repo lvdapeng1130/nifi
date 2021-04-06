@@ -456,7 +456,7 @@
                     <bundle>
                         <artifact>nifi-asn1-nar</artifact>
                         <group>org.apache.nifi</group>
-                        <version>1.13.0-SNAPSHOT</version>
+                        <version>1.14.0-SNAPSHOT</version>
                     </bundle>
                     <comments></comments>
                     <descriptors>

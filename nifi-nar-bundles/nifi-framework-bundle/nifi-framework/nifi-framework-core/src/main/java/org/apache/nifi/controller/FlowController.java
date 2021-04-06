@@ -177,6 +177,7 @@ import org.apache.nifi.reporting.ReportingTask;
 import org.apache.nifi.reporting.Severity;
 import org.apache.nifi.reporting.StandardEventAccess;
 import org.apache.nifi.reporting.UserAwareEventAccess;
+import org.apache.nifi.reporting.bo.KyCounter;
 import org.apache.nifi.scheduling.SchedulingStrategy;
 import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.security.util.StandardTlsConfiguration;
@@ -2056,6 +2057,27 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         final CounterRepository counterRepo = counterRepositoryRef.get();
         final Counter resetValue = counterRepo.resetCounter(identifier);
         return resetValue;
+    }
+
+    public List<KyCounter> getKyCounters() {
+        final List<KyCounter> counters = new ArrayList<>();
+
+        final CounterRepository counterRepo = counterRepositoryRef.get();
+        for (final Counter counter : counterRepo.getCounters()) {
+            KyCounter kyCounter=new KyCounter(counter.getIdentifier(),counter.getContext(),counter.getName());
+            kyCounter.adjust(counter.getValue());
+            counters.add(kyCounter);
+        }
+
+        return counters;
+    }
+
+    public KyCounter resetKyCounter(final String identifier) {
+        final CounterRepository counterRepo = counterRepositoryRef.get();
+        final Counter resetValue = counterRepo.resetCounter(identifier);
+        KyCounter kyCounter=new KyCounter(resetValue.getIdentifier(),resetValue.getContext(),resetValue.getName());
+        kyCounter.adjust(resetValue.getValue());
+        return kyCounter;
     }
 
     //
