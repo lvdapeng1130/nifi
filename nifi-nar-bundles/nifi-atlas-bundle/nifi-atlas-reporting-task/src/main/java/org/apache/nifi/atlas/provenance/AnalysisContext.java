@@ -32,4 +32,5 @@ public interface AnalysisContext {
     ComputeLineageResult findParents(long eventId);
     ProvenanceEventRecord getProvenanceEvent(long eventId);
     String getAwsS3ModelVersion();
+    FilesystemPathsLevel getFilesystemPathsLevel();
 }

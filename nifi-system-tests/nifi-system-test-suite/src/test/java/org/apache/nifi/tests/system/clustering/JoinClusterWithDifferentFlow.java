@@ -18,7 +18,8 @@ package org.apache.nifi.tests.system.clustering;
 
 import org.apache.nifi.controller.serialization.FlowEncodingVersion;
 import org.apache.nifi.controller.serialization.FlowFromDOMFactory;
-import org.apache.nifi.encrypt.StringEncryptor;
+import org.apache.nifi.encrypt.PropertyEncryptor;
+import org.apache.nifi.encrypt.PropertyEncryptorFactory;
 import org.apache.nifi.security.xml.XmlUtils;
 import org.apache.nifi.tests.system.InstanceConfiguration;
 import org.apache.nifi.tests.system.NiFiInstance;
@@ -54,7 +55,6 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileFilter;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -106,16 +106,16 @@ public class JoinClusterWithDifferentFlow extends NiFiSystemIT {
     }
 
 
-    private File getBackupFile(final File confDir) throws InterruptedException {
-        final FileFilter fileFilter = file -> file.getName().startsWith("flow") && file.getName().endsWith(".xml.gz");
-
-        waitFor(() -> {
-            final File[] flowXmlFileArray = confDir.listFiles(fileFilter);
-            return flowXmlFileArray != null && flowXmlFileArray.length == 2;
-        });
-
-        final File[] flowXmlFileArray = confDir.listFiles(fileFilter);
+    private List<File> getFlowXmlFiles(final File confDir) {
+        final File[] flowXmlFileArray = confDir.listFiles(file -> file.getName().startsWith("flow") && file.getName().endsWith(".xml.gz"));
         final List<File> flowXmlFiles = new ArrayList<>(Arrays.asList(flowXmlFileArray));
+        return flowXmlFiles;
+    }
+
+    private File getBackupFile(final File confDir) throws InterruptedException {
+        waitFor(() -> getFlowXmlFiles(confDir).size() == 2);
+
+        final List<File> flowXmlFiles = getFlowXmlFiles(confDir);
         assertEquals(2, flowXmlFiles.size());
 
         flowXmlFiles.removeIf(file -> file.getName().equals("flow.xml.gz"));
@@ -143,7 +143,7 @@ public class JoinClusterWithDifferentFlow extends NiFiSystemIT {
         final FlowEncodingVersion encodingVersion = FlowEncodingVersion.parse(rootElement);
 
         final NiFiInstance node2 = getNiFiInstance().getNodeInstance(2);
-        final StringEncryptor encryptor = createEncryptorFromProperties(node2.getProperties());
+        final PropertyEncryptor encryptor = createEncryptorFromProperties(node2.getProperties());
         final Element rootGroupElement = (Element) rootElement.getElementsByTagName("rootGroup").item(0);
 
         final ProcessGroupDTO groupDto = FlowFromDOMFactory.getProcessGroup(null, rootGroupElement, encryptor, encodingVersion);
@@ -236,11 +236,9 @@ public class JoinClusterWithDifferentFlow extends NiFiSystemIT {
         assertFalse(firstService.getId().endsWith("00"));
     }
 
-    private StringEncryptor createEncryptorFromProperties(Properties nifiProperties) {
-        final String algorithm = nifiProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_ALGORITHM);
-        final String provider = nifiProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_PROVIDER);
-        final String password = nifiProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_KEY);
-        return StringEncryptor.createEncryptor(algorithm, provider, password);
+    private PropertyEncryptor createEncryptorFromProperties(Properties properties) {
+        final NiFiProperties niFiProperties = NiFiProperties.createBasicNiFiProperties(null, properties);
+        return PropertyEncryptorFactory.getPropertyEncryptor(niFiProperties);
     }
 
     private String readFlow(final File file) throws IOException {

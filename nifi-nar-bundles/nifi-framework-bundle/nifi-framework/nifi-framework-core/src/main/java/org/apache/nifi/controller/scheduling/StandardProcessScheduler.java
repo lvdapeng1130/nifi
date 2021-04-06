@@ -40,7 +40,7 @@ import org.apache.nifi.controller.repository.scheduling.ConnectableProcessContex
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
 import org.apache.nifi.controller.service.StandardConfigurationContext;
-import org.apache.nifi.encrypt.StringEncryptor;
+import org.apache.nifi.encrypt.PropertyEncryptor;
 import org.apache.nifi.engine.FlowEngine;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.nar.NarCloseable;
@@ -91,9 +91,9 @@ public final class StandardProcessScheduler implements ProcessScheduler {
     private final ScheduledExecutorService componentLifeCycleThreadPool;
     private final ScheduledExecutorService componentMonitoringThreadPool = new FlowEngine(2, "Monitor Processor Lifecycle", true);
 
-    private final StringEncryptor encryptor;
+    private final PropertyEncryptor encryptor;
 
-    public StandardProcessScheduler(final FlowEngine componentLifecycleThreadPool, final FlowController flowController, final StringEncryptor encryptor,
+    public StandardProcessScheduler(final FlowEngine componentLifecycleThreadPool, final FlowController flowController, final PropertyEncryptor encryptor,
         final StateManagerProvider stateManagerProvider, final NiFiProperties nifiProperties) {
         this.componentLifeCycleThreadPool = componentLifecycleThreadPool;
         this.flowController = flowController;
@@ -353,6 +353,47 @@ public final class StandardProcessScheduler implements ProcessScheduler {
     }
 
     /**
+     * Runs the given {@link Processor} once by invoking its
+     * {@link ProcessorNode#runOnce(ScheduledExecutorService, long, long, Supplier, SchedulingAgentCallback)}
+     * method.
+     *
+     * @see ProcessorNode#runOnce(ScheduledExecutorService, long, long, Supplier, SchedulingAgentCallback)
+     */
+    @Override
+    public Future<Void> runProcessorOnce(ProcessorNode procNode, final Callable<Future<Void>> stopCallback) {
+        final LifecycleState lifecycleState = getLifecycleState(requireNonNull(procNode), true);
+
+        final Supplier<ProcessContext> processContextFactory = () -> new StandardProcessContext(procNode, getControllerServiceProvider(),
+            this.encryptor, getStateManager(procNode.getIdentifier()), lifecycleState::isTerminated, flowController);
+
+        final CompletableFuture<Void> future = new CompletableFuture<>();
+        final SchedulingAgentCallback callback = new SchedulingAgentCallback() {
+            @Override
+            public void trigger() {
+                lifecycleState.clearTerminationFlag();
+                getSchedulingAgent(procNode).scheduleOnce(procNode, lifecycleState, stopCallback);
+                future.complete(null);
+            }
+
+            @Override
+            public Future<?> scheduleTask(final Callable<?> task) {
+                lifecycleState.incrementActiveThreadCount(null);
+                return componentLifeCycleThreadPool.submit(task);
+            }
+
+            @Override
+            public void onTaskComplete() {
+                lifecycleState.decrementActiveThreadCount(null);
+            }
+        };
+
+        LOG.info("Running once {}", procNode);
+        procNode.runOnce(componentMonitoringThreadPool, administrativeYieldMillis, processorStartTimeoutMillis, processContextFactory, callback);
+
+        return future;
+    }
+
+    /**
      * Stops the given {@link Processor} by invoking its
      * {@link ProcessorNode#stop(ProcessScheduler, ScheduledExecutorService, ProcessContext, SchedulingAgent, LifecycleState)}
      * method.
@@ -372,7 +413,7 @@ public final class StandardProcessScheduler implements ProcessScheduler {
 
     @Override
     public synchronized void terminateProcessor(final ProcessorNode procNode) {
-        if (procNode.getScheduledState() != ScheduledState.STOPPED) {
+        if (procNode.getScheduledState() != ScheduledState.STOPPED && procNode.getScheduledState() != ScheduledState.RUN_ONCE) {
             throw new IllegalStateException("Cannot terminate " + procNode + " because it is not currently stopped");
         }
 

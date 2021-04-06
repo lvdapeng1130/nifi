@@ -19,7 +19,7 @@
     <parent>
         <groupId>org.apache.nifi</groupId>
         <artifactId>nifi-nar-bundles</artifactId>
-        <version>1.13.1-SNAPSHOT</version>
+        <version>1.14.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>nifi-azure-bundle</artifactId>
@@ -28,7 +28,6 @@
     <properties>
         <azure-storage.version>8.4.0</azure-storage.version>
         <azure.core.version>1.6.0</azure.core.version>
-        <jackson.version>2.10.3</jackson.version>
         <azure-cosmos.version>4.2.0</azure-cosmos.version>
     </properties>
 

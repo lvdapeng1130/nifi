@@ -33,14 +33,26 @@ import org.apache.nifi.cluster.coordination.node.ClusterRoles;
 import org.apache.nifi.cluster.coordination.node.DisconnectionCode;
 import org.apache.nifi.cluster.coordination.node.NodeConnectionState;
 import org.apache.nifi.cluster.coordination.node.NodeConnectionStatus;
-import org.apache.nifi.cluster.protocol.*;
+import org.apache.nifi.cluster.protocol.DataFlow;
+import org.apache.nifi.cluster.protocol.Heartbeat;
+import org.apache.nifi.cluster.protocol.HeartbeatPayload;
+import org.apache.nifi.cluster.protocol.NodeIdentifier;
+import org.apache.nifi.cluster.protocol.NodeProtocolSender;
+import org.apache.nifi.cluster.protocol.UnknownServiceAddressException;
 import org.apache.nifi.cluster.protocol.message.HeartbeatMessage;
+import org.apache.nifi.components.monitor.LongRunningTaskMonitor;
 import org.apache.nifi.components.state.StateManagerProvider;
 import org.apache.nifi.components.validation.StandardValidationTrigger;
 import org.apache.nifi.components.validation.TriggerValidationTask;
 import org.apache.nifi.components.validation.ValidationStatus;
 import org.apache.nifi.components.validation.ValidationTrigger;
-import org.apache.nifi.connectable.*;
+import org.apache.nifi.connectable.Connectable;
+import org.apache.nifi.connectable.ConnectableType;
+import org.apache.nifi.connectable.Connection;
+import org.apache.nifi.connectable.Funnel;
+import org.apache.nifi.connectable.Port;
+import org.apache.nifi.connectable.Position;
+import org.apache.nifi.connectable.StandardConnection;
 import org.apache.nifi.controller.cluster.ClusterProtocolHeartbeater;
 import org.apache.nifi.controller.cluster.Heartbeater;
 import org.apache.nifi.controller.exception.CommunicationsException;
@@ -49,14 +61,23 @@ import org.apache.nifi.controller.flow.StandardFlowManager;
 import org.apache.nifi.controller.kerberos.KerberosConfig;
 import org.apache.nifi.controller.leader.election.LeaderElectionManager;
 import org.apache.nifi.controller.leader.election.LeaderElectionStateChangeListener;
-import org.apache.nifi.controller.queue.*;
+import org.apache.nifi.controller.queue.ConnectionEventListener;
+import org.apache.nifi.controller.queue.FlowFileQueue;
+import org.apache.nifi.controller.queue.FlowFileQueueFactory;
+import org.apache.nifi.controller.queue.LoadBalanceStrategy;
+import org.apache.nifi.controller.queue.QueueSize;
+import org.apache.nifi.controller.queue.StandardFlowFileQueue;
 import org.apache.nifi.controller.queue.clustered.ContentRepositoryFlowFileAccess;
 import org.apache.nifi.controller.queue.clustered.SocketLoadBalancedFlowFileQueue;
 import org.apache.nifi.controller.queue.clustered.client.StandardLoadBalanceFlowFileCodec;
 import org.apache.nifi.controller.queue.clustered.client.async.nio.NioAsyncLoadBalanceClientFactory;
 import org.apache.nifi.controller.queue.clustered.client.async.nio.NioAsyncLoadBalanceClientRegistry;
 import org.apache.nifi.controller.queue.clustered.client.async.nio.NioAsyncLoadBalanceClientTask;
-import org.apache.nifi.controller.queue.clustered.server.*;
+import org.apache.nifi.controller.queue.clustered.server.ClusterLoadBalanceAuthorizer;
+import org.apache.nifi.controller.queue.clustered.server.ConnectionLoadBalanceServer;
+import org.apache.nifi.controller.queue.clustered.server.LoadBalanceAuthorizer;
+import org.apache.nifi.controller.queue.clustered.server.LoadBalanceProtocol;
+import org.apache.nifi.controller.queue.clustered.server.StandardLoadBalanceProtocol;
 import org.apache.nifi.controller.reporting.ReportingTaskInstantiationException;
 import org.apache.nifi.controller.reporting.ReportingTaskProvider;
 import org.apache.nifi.controller.repository.ContentRepository;
@@ -80,8 +101,16 @@ import org.apache.nifi.controller.repository.claim.ResourceClaimManager;
 import org.apache.nifi.controller.repository.claim.StandardContentClaim;
 import org.apache.nifi.controller.repository.claim.StandardResourceClaimManager;
 import org.apache.nifi.controller.repository.io.LimitedInputStream;
-import org.apache.nifi.controller.scheduling.*;
-import org.apache.nifi.controller.serialization.*;
+import org.apache.nifi.controller.scheduling.EventDrivenSchedulingAgent;
+import org.apache.nifi.controller.scheduling.QuartzSchedulingAgent;
+import org.apache.nifi.controller.scheduling.RepositoryContextFactory;
+import org.apache.nifi.controller.scheduling.StandardProcessScheduler;
+import org.apache.nifi.controller.scheduling.TimerDrivenSchedulingAgent;
+import org.apache.nifi.controller.serialization.FlowSerializationException;
+import org.apache.nifi.controller.serialization.FlowSerializer;
+import org.apache.nifi.controller.serialization.FlowSynchronizationException;
+import org.apache.nifi.controller.serialization.FlowSynchronizer;
+import org.apache.nifi.controller.serialization.ScheduledStateLookup;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
 import org.apache.nifi.controller.service.StandardControllerServiceProvider;
@@ -93,12 +122,18 @@ import org.apache.nifi.controller.status.analytics.CachingConnectionStatusAnalyt
 import org.apache.nifi.controller.status.analytics.ConnectionStatusAnalytics;
 import org.apache.nifi.controller.status.analytics.StatusAnalyticsEngine;
 import org.apache.nifi.controller.status.analytics.StatusAnalyticsModelMapFactory;
-import org.apache.nifi.controller.status.history.*;
+import org.apache.nifi.controller.status.history.GarbageCollectionHistory;
+import org.apache.nifi.controller.status.history.GarbageCollectionStatus;
+import org.apache.nifi.controller.status.history.StandardGarbageCollectionStatus;
+import org.apache.nifi.controller.status.history.StatusHistoryRepository;
+import org.apache.nifi.controller.status.history.StatusHistoryUtil;
 import org.apache.nifi.controller.tasks.ExpireFlowFiles;
 import org.apache.nifi.diagnostics.StorageUsage;
 import org.apache.nifi.diagnostics.SystemDiagnostics;
 import org.apache.nifi.diagnostics.SystemDiagnosticsFactory;
-import org.apache.nifi.encrypt.StringEncryptor;
+import org.apache.nifi.encrypt.PropertyEncryptor;
+import org.apache.nifi.encrypt.SensitiveValueEncoder;
+import org.apache.nifi.encrypt.StandardSensitiveValueEncoder;
 import org.apache.nifi.engine.FlowEngine;
 import org.apache.nifi.events.BulletinFactory;
 import org.apache.nifi.events.EventReporter;
@@ -107,6 +142,7 @@ import org.apache.nifi.flowfile.attributes.CoreAttributes;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.groups.RemoteProcessGroup;
 import org.apache.nifi.groups.StandardProcessGroup;
+import org.apache.nifi.nar.ExtensionDefinition;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.nar.NarCloseable;
 import org.apache.nifi.nar.NarThreadContextClassLoader;
@@ -115,17 +151,32 @@ import org.apache.nifi.parameter.ParameterLookup;
 import org.apache.nifi.parameter.StandardParameterContextManager;
 import org.apache.nifi.processor.Processor;
 import org.apache.nifi.processor.Relationship;
-import org.apache.nifi.provenance.*;
+import org.apache.nifi.provenance.ComponentIdentifierLookup;
+import org.apache.nifi.provenance.IdentifierLookup;
+import org.apache.nifi.provenance.ProvenanceAuthorizableFactory;
+import org.apache.nifi.provenance.ProvenanceEventRecord;
+import org.apache.nifi.provenance.ProvenanceEventType;
+import org.apache.nifi.provenance.ProvenanceRepository;
+import org.apache.nifi.provenance.StandardProvenanceAuthorizableFactory;
+import org.apache.nifi.provenance.StandardProvenanceEventRecord;
 import org.apache.nifi.registry.VariableRegistry;
 import org.apache.nifi.registry.flow.FlowRegistryClient;
 import org.apache.nifi.registry.flow.VersionedConnection;
 import org.apache.nifi.registry.flow.VersionedProcessGroup;
 import org.apache.nifi.registry.variable.MutableVariableRegistry;
-import org.apache.nifi.remote.*;
+import org.apache.nifi.remote.HttpRemoteSiteListener;
+import org.apache.nifi.remote.RemoteGroupPort;
+import org.apache.nifi.remote.RemoteResourceManager;
+import org.apache.nifi.remote.RemoteSiteListener;
+import org.apache.nifi.remote.SocketRemoteSiteListener;
 import org.apache.nifi.remote.cluster.NodeInformant;
 import org.apache.nifi.remote.protocol.socket.SocketFlowFileServerProtocol;
-import org.apache.nifi.reporting.*;
-import org.apache.nifi.reporting.bo.KyCounter;
+import org.apache.nifi.reporting.Bulletin;
+import org.apache.nifi.reporting.BulletinRepository;
+import org.apache.nifi.reporting.ReportingTask;
+import org.apache.nifi.reporting.Severity;
+import org.apache.nifi.reporting.StandardEventAccess;
+import org.apache.nifi.reporting.UserAwareEventAccess;
 import org.apache.nifi.scheduling.SchedulingStrategy;
 import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.security.util.StandardTlsConfiguration;
@@ -192,7 +243,6 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     public static final String GRACEFUL_SHUTDOWN_PERIOD = "nifi.flowcontroller.graceful.shutdown.seconds";
     public static final long DEFAULT_GRACEFUL_SHUTDOWN_SECONDS = 10;
 
-
     // default properties for scaling the positions of components from pre-1.0 flow encoding versions.
     public static final double DEFAULT_POSITION_SCALE_FACTOR_X = 1.5;
     public static final double DEFAULT_POSITION_SCALE_FACTOR_Y = 1.34;
@@ -222,7 +272,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     private final Authorizer authorizer;
     private final AuditService auditService;
     private final EventDrivenWorkerQueue eventDrivenWorkerQueue;
-    private final ComponentStatusRepository componentStatusRepository;
+    private final StatusHistoryRepository statusHistoryRepository;
     private final StateManagerProvider stateManagerProvider;
     private final long systemStartTime = System.currentTimeMillis(); // time at which the node was started
     private final VariableRegistry variableRegistry;
@@ -261,6 +311,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     private final StandardFlowManager flowManager;
     private final RepositoryContextFactory repositoryContextFactory;
     private final RingBufferGarbageCollectionLog gcLog;
+    private final FlowEngine longRunningTaskMonitorThreadPool;
 
     /**
      * true if controller is configured to operate in a clustered environment
@@ -275,7 +326,12 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     /**
      * The sensitive property string encryptor *
      */
-    private final StringEncryptor encryptor;
+    private final PropertyEncryptor encryptor;
+
+    /**
+     * The sensitive value string encoder (hasher)
+     */
+    private final SensitiveValueEncoder sensitiveValueEncoder;
 
     private final ScheduledExecutorService clusterTaskExecutor = new FlowEngine(3, "Clustering Tasks", true);
     private final ResourceClaimManager resourceClaimManager = new StandardResourceClaimManager();
@@ -327,7 +383,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             final NiFiProperties properties,
             final Authorizer authorizer,
             final AuditService auditService,
-            final StringEncryptor encryptor,
+            final PropertyEncryptor encryptor,
             final BulletinRepository bulletinRepo,
             final VariableRegistry variableRegistry,
             final FlowRegistryClient flowRegistryClient,
@@ -356,7 +412,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             final NiFiProperties properties,
             final Authorizer authorizer,
             final AuditService auditService,
-            final StringEncryptor encryptor,
+            final PropertyEncryptor encryptor,
             final NodeProtocolSender protocolSender,
             final BulletinRepository bulletinRepo,
             final ClusterCoordinator clusterCoordinator,
@@ -393,7 +449,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             final NiFiProperties nifiProperties,
             final Authorizer authorizer,
             final AuditService auditService,
-            final StringEncryptor encryptor,
+            final PropertyEncryptor encryptor,
             final boolean configuredForClustering,
             final NodeProtocolSender protocolSender,
             final BulletinRepository bulletinRepo,
@@ -428,6 +484,8 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             LOG.error("Unable to start the flow controller because the TLS configuration was invalid: {}", e.getLocalizedMessage());
             throw new IllegalStateException("Flow controller TLS configuration is invalid", e);
         }
+
+        this.sensitiveValueEncoder = new StandardSensitiveValueEncoder(nifiProperties);
 
         timerDrivenEngineRef = new AtomicReference<>(new FlowEngine(maxTimerDrivenThreads.get(), "Timer-Driven Process"));
         eventDrivenEngineRef = new AtomicReference<>(new FlowEngine(maxEventDrivenThreads.get(), "Event-Driven Process"));
@@ -521,7 +579,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         this.reloadComponent = new StandardReloadComponent(this);
 
         final ProcessGroup rootGroup = new StandardProcessGroup(ComponentIdGenerator.generateId().toString(), controllerServiceProvider, processScheduler,
-                encryptor, extensionManager, stateManagerProvider, flowManager, flowRegistryClient, reloadComponent, new MutableVariableRegistry(this.variableRegistry), this);
+            encryptor, extensionManager, stateManagerProvider, flowManager, flowRegistryClient, reloadComponent, new MutableVariableRegistry(this.variableRegistry), this);
         rootGroup.setName(FlowManager.DEFAULT_ROOT_GROUP_NAME);
         setRootGroup(rootGroup);
         instanceId = ComponentIdGenerator.generateId().toString();
@@ -573,7 +631,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             zooKeeperStateServer = null;
         }
 
-        componentStatusRepository = createComponentStatusRepository();
+        statusHistoryRepository = createStatusHistoryRepository();
 
         final boolean analyticsEnabled = Boolean.parseBoolean(nifiProperties.getProperty(NiFiProperties.ANALYTICS_PREDICTION_ENABLED, NiFiProperties.DEFAULT_ANALYTICS_PREDICTION_ENABLED));
 
@@ -617,7 +675,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
 
             StatusAnalyticsModelMapFactory statusAnalyticsModelMapFactory = new StatusAnalyticsModelMapFactory(extensionManager, nifiProperties);
 
-            analyticsEngine = new CachingConnectionStatusAnalyticsEngine(flowManager, componentStatusRepository, statusAnalyticsModelMapFactory,
+            analyticsEngine = new CachingConnectionStatusAnalyticsEngine(flowManager, statusHistoryRepository, statusAnalyticsModelMapFactory,
                     predictionIntervalMillis, queryIntervalMillis, modelScoreName, modelScoreThreshold);
 
             timerDrivenEngineRef.get().scheduleWithFixedDelay(new Runnable() {
@@ -647,7 +705,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             @Override
             public void run() {
                 try {
-                    componentStatusRepository.capture(getNodeStatusSnapshot(), eventAccess.getControllerStatus(), getGarbageCollectionStatus());
+                    statusHistoryRepository.capture(getNodeStatusSnapshot(), eventAccess.getControllerStatus(), getGarbageCollectionStatus(), new Date());
                 } catch (final Exception e) {
                     LOG.error("Failed to capture component stats for Stats History", e);
                 }
@@ -705,7 +763,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
 
             final int connectionsPerNode = nifiProperties.getIntegerProperty(NiFiProperties.LOAD_BALANCE_CONNECTIONS_PER_NODE, NiFiProperties.DEFAULT_LOAD_BALANCE_CONNECTIONS_PER_NODE);
             final NioAsyncLoadBalanceClientFactory asyncClientFactory = new NioAsyncLoadBalanceClientFactory(sslContext, timeoutMillis, new ContentRepositoryFlowFileAccess(contentRepository),
-                    eventReporter, new StandardLoadBalanceFlowFileCodec());
+                    eventReporter, new StandardLoadBalanceFlowFileCodec(), clusterCoordinator);
             loadBalanceClientRegistry = new NioAsyncLoadBalanceClientRegistry(asyncClientFactory, connectionsPerNode);
 
             final int loadBalanceClientThreadCount = nifiProperties.getIntegerProperty(NiFiProperties.LOAD_BALANCE_MAX_THREAD_COUNT, NiFiProperties.DEFAULT_LOAD_BALANCE_MAX_THREAD_COUNT);
@@ -722,6 +780,8 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             loadBalanceServer = null;
             loadBalanceClientThreadPool = null;
         }
+
+        longRunningTaskMonitorThreadPool = new FlowEngine(1, "Long Running Task Monitor", true);
     }
 
     @Override
@@ -1036,9 +1096,31 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
             for (final Connection connection : flowManager.findAllConnections()) {
                 connection.getFlowFileQueue().startLoadBalancing();
             }
+
+            scheduleLongRunningTaskMonitor();
         } finally {
             writeLock.unlock("onFlowInitialized");
         }
+    }
+
+    private void scheduleLongRunningTaskMonitor() {
+        final long scheduleMillis = parseDurationPropertyToMillis(NiFiProperties.MONITOR_LONG_RUNNING_TASK_SCHEDULE, NiFiProperties.DEFAULT_MONITOR_LONG_RUNNING_TASK_SCHEDULE);
+        final long thresholdMillis = parseDurationPropertyToMillis(NiFiProperties.MONITOR_LONG_RUNNING_TASK_THRESHOLD, NiFiProperties.DEFAULT_MONITOR_LONG_RUNNING_TASK_THRESHOLD);
+
+        LongRunningTaskMonitor longRunningTaskMonitor = new LongRunningTaskMonitor(getFlowManager(), createEventReporter(), thresholdMillis);
+        longRunningTaskMonitorThreadPool.scheduleWithFixedDelay(longRunningTaskMonitor, scheduleMillis, scheduleMillis, TimeUnit.MILLISECONDS);
+    }
+
+    private long parseDurationPropertyToMillis(String propertyName, String defaultValue) {
+        long durationMillis;
+        try {
+            final String duration = nifiProperties.getProperty(propertyName);
+            durationMillis = (long) FormatUtils.getPreciseTimeDuration(duration, TimeUnit.MILLISECONDS);
+        } catch (final Exception e) {
+            LOG.warn("Could not retrieve value for {}. This property has been set to '{}'", propertyName, defaultValue);
+            durationMillis = (long) FormatUtils.getPreciseTimeDuration(defaultValue, TimeUnit.MILLISECONDS);
+        }
+        return durationMillis;
     }
 
     public boolean isStartAfterInitialization(final Connectable component) {
@@ -1077,20 +1159,21 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         }
     }
 
-    private ComponentStatusRepository createComponentStatusRepository() {
+    private StatusHistoryRepository createStatusHistoryRepository() {
         final String implementationClassName = nifiProperties.getProperty(NiFiProperties.COMPONENT_STATUS_REPOSITORY_IMPLEMENTATION, DEFAULT_COMPONENT_STATUS_REPO_IMPLEMENTATION);
         if (implementationClassName == null) {
-            throw new RuntimeException("Cannot create Component Status Repository because the NiFi Properties is missing the following property: "
+            throw new RuntimeException("Cannot create Status History Repository because the NiFi Properties is missing the following property: "
                     + NiFiProperties.COMPONENT_STATUS_REPOSITORY_IMPLEMENTATION);
         }
 
         try {
-            return NarThreadContextClassLoader.createInstance(extensionManager, implementationClassName, ComponentStatusRepository.class, nifiProperties);
+            final StatusHistoryRepository repository = NarThreadContextClassLoader.createInstance(extensionManager, implementationClassName, StatusHistoryRepository.class, nifiProperties);
+            repository.start();
+            return repository;
         } catch (final Exception e) {
             throw new RuntimeException(e);
         }
     }
-
 
     public KerberosConfig createKerberosConfig(final NiFiProperties nifiProperties) {
         final String principal = nifiProperties.getKerberosServicePrincipal();
@@ -1110,8 +1193,12 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         return validationTrigger;
     }
 
-    public StringEncryptor getEncryptor() {
+    public PropertyEncryptor getEncryptor() {
         return encryptor;
+    }
+
+    public SensitiveValueEncoder getSensitiveValueEncoder() {
+        return sensitiveValueEncoder;
     }
 
     /**
@@ -1285,6 +1372,10 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
                     }
                 }
             }
+
+            if (statusHistoryRepository != null) {
+                statusHistoryRepository.shutdown();
+            }
         } finally {
             readLock.unlock("shutdown");
         }
@@ -1338,7 +1429,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
      * Synchronizes this controller with the proposed flow.
      * <p>
      * For more details, see
-     * {@link FlowSynchronizer#sync(FlowController, DataFlow, StringEncryptor, FlowService)}.
+     * {@link FlowSynchronizer#sync(FlowController, DataFlow, PropertyEncryptor, FlowService)}.
      *
      * @param synchronizer synchronizer
      * @param dataFlow the flow to load the controller with. If the flow is null
@@ -1562,22 +1653,23 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
 
     public void verifyComponentTypesInSnippet(final VersionedProcessGroup versionedFlow) {
         final Map<String, Set<BundleCoordinate>> processorClasses = new HashMap<>();
-        for (final Class<?> c : extensionManager.getExtensions(Processor.class)) {
-            final String name = c.getName();
+        for (final ExtensionDefinition extensionDefinition : extensionManager.getExtensions(Processor.class)) {
+            final String name = extensionDefinition.getImplementationClassName();
             processorClasses.put(name, extensionManager.getBundles(name).stream().map(bundle -> bundle.getBundleDetails().getCoordinate()).collect(Collectors.toSet()));
         }
         verifyProcessorsInVersionedFlow(versionedFlow, processorClasses);
 
         final Map<String, Set<BundleCoordinate>> controllerServiceClasses = new HashMap<>();
-        for (final Class<?> c : extensionManager.getExtensions(ControllerService.class)) {
-            final String name = c.getName();
+        for (final ExtensionDefinition extensionDefinition : extensionManager.getExtensions(ControllerService.class)) {
+            final String name = extensionDefinition.getImplementationClassName();
             controllerServiceClasses.put(name, extensionManager.getBundles(name).stream().map(bundle -> bundle.getBundleDetails().getCoordinate()).collect(Collectors.toSet()));
         }
         verifyControllerServicesInVersionedFlow(versionedFlow, controllerServiceClasses);
 
         final Set<String> prioritizerClasses = new HashSet<>();
-        for (final Class<?> c : extensionManager.getExtensions(FlowFilePrioritizer.class)) {
-            prioritizerClasses.add(c.getName());
+        for (final ExtensionDefinition extensionDefinition : extensionManager.getExtensions(FlowFilePrioritizer.class)) {
+            final String name = extensionDefinition.getImplementationClassName();
+            prioritizerClasses.add(name);
         }
 
         final Set<VersionedConnection> allConns = new HashSet<>();
@@ -1646,7 +1738,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     }
 
     public GarbageCollectionHistory getGarbageCollectionHistory() {
-        return componentStatusRepository.getGarbageCollectionHistory(new Date(0L), new Date());
+        return statusHistoryRepository.getGarbageCollectionHistory(new Date(0L), new Date());
     }
 
 
@@ -1964,27 +2056,6 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         final CounterRepository counterRepo = counterRepositoryRef.get();
         final Counter resetValue = counterRepo.resetCounter(identifier);
         return resetValue;
-    }
-
-    public List<KyCounter> getKyCounters() {
-        final List<KyCounter> counters = new ArrayList<>();
-
-        final CounterRepository counterRepo = counterRepositoryRef.get();
-        for (final Counter counter : counterRepo.getCounters()) {
-            KyCounter kyCounter=new KyCounter(counter.getIdentifier(),counter.getContext(),counter.getName());
-            kyCounter.adjust(counter.getValue());
-            counters.add(kyCounter);
-        }
-
-        return counters;
-    }
-
-    public KyCounter resetKyCounter(final String identifier) {
-        final CounterRepository counterRepo = counterRepositoryRef.get();
-        final Counter resetValue = counterRepo.resetCounter(identifier);
-        KyCounter kyCounter=new KyCounter(resetValue.getIdentifier(),resetValue.getContext(),resetValue.getName());
-        kyCounter.adjust(resetValue.getValue());
-        return kyCounter;
     }
 
     //
@@ -2941,7 +3012,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     }
 
     public StatusHistoryDTO getConnectionStatusHistory(final String connectionId, final Date startTime, final Date endTime, final int preferredDataPoints) {
-        return StatusHistoryUtil.createStatusHistoryDTO(componentStatusRepository.getConnectionStatusHistory(connectionId, startTime, endTime, preferredDataPoints));
+        return StatusHistoryUtil.createStatusHistoryDTO(statusHistoryRepository.getConnectionStatusHistory(connectionId, startTime, endTime, preferredDataPoints));
     }
 
     public StatusHistoryDTO getProcessorStatusHistory(final String processorId, final boolean includeCounters) {
@@ -2949,7 +3020,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     }
 
     public StatusHistoryDTO getProcessorStatusHistory(final String processorId, final Date startTime, final Date endTime, final int preferredDataPoints, final boolean includeCounters) {
-        return StatusHistoryUtil.createStatusHistoryDTO(componentStatusRepository.getProcessorStatusHistory(processorId, startTime, endTime, preferredDataPoints, includeCounters));
+        return StatusHistoryUtil.createStatusHistoryDTO(statusHistoryRepository.getProcessorStatusHistory(processorId, startTime, endTime, preferredDataPoints, includeCounters));
     }
 
     public StatusHistoryDTO getProcessGroupStatusHistory(final String processGroupId) {
@@ -2957,7 +3028,7 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     }
 
     public StatusHistoryDTO getProcessGroupStatusHistory(final String processGroupId, final Date startTime, final Date endTime, final int preferredDataPoints) {
-        return StatusHistoryUtil.createStatusHistoryDTO(componentStatusRepository.getProcessGroupStatusHistory(processGroupId, startTime, endTime, preferredDataPoints));
+        return StatusHistoryUtil.createStatusHistoryDTO(statusHistoryRepository.getProcessGroupStatusHistory(processGroupId, startTime, endTime, preferredDataPoints));
     }
 
     public StatusHistoryDTO getRemoteProcessGroupStatusHistory(final String remoteGroupId) {
@@ -2965,11 +3036,11 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
     }
 
     public StatusHistoryDTO getRemoteProcessGroupStatusHistory(final String remoteGroupId, final Date startTime, final Date endTime, final int preferredDataPoints) {
-        return StatusHistoryUtil.createStatusHistoryDTO(componentStatusRepository.getRemoteProcessGroupStatusHistory(remoteGroupId, startTime, endTime, preferredDataPoints));
+        return StatusHistoryUtil.createStatusHistoryDTO(statusHistoryRepository.getRemoteProcessGroupStatusHistory(remoteGroupId, startTime, endTime, preferredDataPoints));
     }
 
     public StatusHistoryDTO getNodeStatusHistory() {
-        return StatusHistoryUtil.createStatusHistoryDTO(componentStatusRepository.getNodeStatusHistory());
+        return StatusHistoryUtil.createStatusHistoryDTO(statusHistoryRepository.getNodeStatusHistory(null, null));
     }
 
     private NodeStatus getNodeStatusSnapshot() {

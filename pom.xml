@@ -18,7 +18,7 @@
     </parent>
     <groupId>org.apache.nifi</groupId>
     <artifactId>nifi</artifactId>
-    <version>1.13.1-SNAPSHOT</version>
+    <version>1.14.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <description>Apache NiFi is an easy to use, powerful, and reliable system to process and distribute data.</description>
     <modules>
@@ -75,7 +75,7 @@
         <connection>scm:git:git://git.apache.org/nifi.git</connection>
         <developerConnection>scm:git:https://git-wip-us.apache.org/repos/asf/nifi.git</developerConnection>
         <url>https://git-wip-us.apache.org/repos/asf?p=nifi.git</url>
-        <tag>nifi-1.13.0-RC4</tag>
+        <tag>HEAD</tag>
     </scm>
     <issueManagement>
         <system>JIRA</system>
@@ -92,9 +92,8 @@
         <org.bouncycastle.version>1.68</org.bouncycastle.version>
         <org.slf4j.version>1.7.30</org.slf4j.version>
         <ranger.version>2.1.0</ranger.version>
-        <jetty.version>9.4.35.v20201120</jetty.version>
-        <jackson.version>2.9.10</jackson.version>
-        <jackson-databind.version>2.9.10.8</jackson-databind.version>
+        <jetty.version>9.4.38.v20210224</jetty.version>
+        <jackson.version>2.12.2</jackson.version>
         <nifi.registry.version>0.8.0</nifi.registry.version>
         <nifi.groovy.version>2.5.4</nifi.groovy.version>
         <surefire.version>2.22.2</surefire.version>
@@ -104,6 +103,7 @@
         <ozone.version>1.0.0</ozone.version>
         <gcs.version>2.1.5</gcs.version>
         <aspectj.version>1.9.6</aspectj.version>
+        <jersey.version>2.33</jersey.version>
     </properties>
 
     <repositories>
