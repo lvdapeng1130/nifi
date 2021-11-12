@@ -24,16 +24,18 @@ import org.apache.nifi.authorization.AuthorizationResult;
 import org.apache.nifi.authorization.Authorizer;
 import org.apache.nifi.authorization.AuthorizerConfigurationContext;
 import org.apache.nifi.authorization.AuthorizerInitializationContext;
-import org.apache.nifi.authorization.FlowParser;
 import org.apache.nifi.authorization.exception.AuthorizationAccessException;
 import org.apache.nifi.authorization.exception.AuthorizerCreationException;
 import org.apache.nifi.authorization.exception.AuthorizerDestructionException;
 import org.apache.nifi.bundle.Bundle;
+import org.apache.nifi.controller.DecommissionTask;
 import org.apache.nifi.controller.FlowController;
 import org.apache.nifi.controller.StandardFlowService;
 import org.apache.nifi.controller.flow.FlowManager;
 import org.apache.nifi.controller.repository.FlowFileEventRepository;
 import org.apache.nifi.controller.repository.metrics.RingBufferEventRepository;
+import org.apache.nifi.controller.status.history.StatusHistoryDumpFactory;
+import org.apache.nifi.controller.status.history.StatusHistoryRepository;
 import org.apache.nifi.diagnostics.DiagnosticsDump;
 import org.apache.nifi.diagnostics.DiagnosticsDumpElement;
 import org.apache.nifi.diagnostics.DiagnosticsFactory;
@@ -51,6 +53,8 @@ import org.apache.nifi.registry.flow.StandardFlowRegistryClient;
 import org.apache.nifi.registry.variable.FileBasedVariableRegistry;
 import org.apache.nifi.reporting.BulletinRepository;
 import org.apache.nifi.services.FlowService;
+import org.apache.nifi.spring.StatusHistoryRepositoryFactoryBean;
+import org.apache.nifi.util.FlowParser;
 import org.apache.nifi.util.NiFiProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,15 +67,17 @@ import java.util.List;
 import java.util.Set;
 
 /**
+ *
  */
 public class HeadlessNiFiServer implements NiFiServer {
 
     private static final Logger logger = LoggerFactory.getLogger(HeadlessNiFiServer.class);
-    private NiFiProperties props;
-    private Bundle systemBundle;
-    private Set<Bundle> bundles;
-    private FlowService flowService;
-    private DiagnosticsFactory diagnosticsFactory;
+    protected NiFiProperties props;
+    protected Bundle systemBundle;
+    protected Set<Bundle> bundles;
+    protected FlowController flowController;
+    protected FlowService flowService;
+    protected DiagnosticsFactory diagnosticsFactory;
 
     /**
      * Default constructor
@@ -126,7 +132,12 @@ public class HeadlessNiFiServer implements NiFiServer {
             StandardFlowRegistryClient flowRegistryClient = new StandardFlowRegistryClient();
             flowRegistryClient.setProperties(props);
 
-            FlowController flowController = FlowController.createStandaloneInstance(
+            final StatusHistoryRepositoryFactoryBean statusHistoryRepositoryFactoryBean = new StatusHistoryRepositoryFactoryBean();
+            statusHistoryRepositoryFactoryBean.setNifiProperties(props);
+            statusHistoryRepositoryFactoryBean.setExtensionManager(extensionManager);
+            StatusHistoryRepository statusHistoryRepository = statusHistoryRepositoryFactoryBean.getObject();
+
+            flowController = FlowController.createStandaloneInstance(
                     flowFileEventRepository,
                     props,
                     authorizer,
@@ -135,7 +146,8 @@ public class HeadlessNiFiServer implements NiFiServer {
                     bulletinRepository,
                     variableRegistry,
                     flowRegistryClient,
-                    extensionManager);
+                    extensionManager,
+                    statusHistoryRepository);
 
             flowService = StandardFlowService.createStandaloneInstance(
                     flowController,
@@ -190,6 +202,16 @@ public class HeadlessNiFiServer implements NiFiServer {
     @Override
     public DiagnosticsFactory getThreadDumpFactory() {
         return new ThreadDumpDiagnosticsFactory();
+    }
+
+    @Override
+    public DecommissionTask getDecommissionTask() {
+        return null;
+    }
+
+    @Override
+    public StatusHistoryDumpFactory getStatusHistoryDumpFactory() {
+        return null;
     }
 
     public void stop() {

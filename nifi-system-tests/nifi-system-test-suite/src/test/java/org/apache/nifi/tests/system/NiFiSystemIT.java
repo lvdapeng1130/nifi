@@ -54,6 +54,7 @@ public abstract class NiFiSystemIT {
     public static final String TEST_EXTENSIONS_ARTIFACT_ID = "nifi-system-test-extensions-nar";
     public static final String TEST_PROCESSORS_PACKAGE = "org.apache.nifi.processors.tests.system";
     public static final String TEST_CS_PACKAGE = "org.apache.nifi.cs.tests.system";
+    public static final String TEST_REPORTING_TASK_PACKAGE = "org.apache.nifi.reporting";
 
     private static final Pattern FRAMEWORK_NAR_PATTERN = Pattern.compile("nifi-framework-nar-(.*?)\\.nar");
     private static final File LIB_DIR = new File("target/nifi-lib-assembly/lib");
@@ -119,7 +120,7 @@ public abstract class NiFiSystemIT {
 
     protected void destroyFlow() throws NiFiClientException, IOException {
         getClientUtil().stopProcessGroupComponents("root");
-        getClientUtil().disableControllerServices("root");
+        getClientUtil().disableControllerServices("root", true);
         getClientUtil().stopTransmitting("root");
         getClientUtil().deleteAll("root");
     }
@@ -272,7 +273,7 @@ public abstract class NiFiSystemIT {
 
         waitForQueueCountToMatch(connectionId, size -> size > 0, "greater than 0");
 
-        logger.info("Waiting for Queue on Connection {} is not empty", connectionId);
+        logger.info("Queue on Connection {} is not empty", connectionId);
     }
 
     protected void waitForQueueCount(final String connectionId, final int queueSize) throws InterruptedException {
@@ -307,6 +308,7 @@ public abstract class NiFiSystemIT {
         try {
             return getNifiClient().getFlowClient().getConnectionStatus(connectionId, true);
         } catch (final Exception e) {
+            e.printStackTrace();
             Assert.fail("Failed to obtain connection status");
             return null;
         }

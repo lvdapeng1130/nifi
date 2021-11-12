@@ -17,6 +17,7 @@
 package org.apache.nifi.processors.aws.s3;
 
 import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.internal.Constants;
 import com.amazonaws.services.s3.model.GetObjectMetadataRequest;
 import com.amazonaws.services.s3.model.GetObjectTaggingRequest;
@@ -43,6 +44,8 @@ import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.components.AllowableValue;
+import org.apache.nifi.components.ConfigVerificationResult;
+import org.apache.nifi.components.ConfigVerificationResult.Outcome;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.PropertyDescriptor.Builder;
 import org.apache.nifi.components.ValidationContext;
@@ -50,6 +53,7 @@ import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.components.Validator;
 import org.apache.nifi.components.state.Scope;
 import org.apache.nifi.components.state.StateMap;
+import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
@@ -57,6 +61,7 @@ import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Relationship;
+import org.apache.nifi.processor.VerifiableProcessor;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.RecordSetWriter;
@@ -82,7 +87,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
+import java.util.concurrent.atomic.AtomicReference;
 
 @PrimaryNodeOnly
 @TriggerSerially
@@ -111,7 +116,7 @@ import java.util.concurrent.TimeUnit;
         @WritesAttribute(attribute = "s3.user.metadata.___", description = "If 'Write User Metadata' is set to 'True', the user defined metadata associated to the S3 object that is being listed " +
                 "will be written as part of the flowfile attributes")})
 @SeeAlso({FetchS3Object.class, PutS3Object.class, DeleteS3Object.class})
-public class ListS3 extends AbstractS3Processor {
+public class ListS3 extends AbstractS3Processor implements VerifiableProcessor {
 
     public static final PropertyDescriptor DELIMITER = new Builder()
             .name("delimiter")
@@ -251,8 +256,7 @@ public class ListS3 extends AbstractS3Processor {
     public static final String CURRENT_KEY_PREFIX = "key-";
 
     // State tracking
-    private volatile long currentTimestamp = 0L;
-    private volatile Set<String> currentKeys;
+    private final AtomicReference<ListingSnapshot> listing = new AtomicReference<>(new ListingSnapshot(0L, Collections.emptySet()));
 
     private static Validator createRequesterPaysValidator() {
         return new Validator() {
@@ -294,12 +298,22 @@ public class ListS3 extends AbstractS3Processor {
     private void restoreState(final ProcessSession session) throws IOException {
         final StateMap stateMap = session.getState(Scope.CLUSTER);
         if (stateMap.getVersion() == -1L || stateMap.get(CURRENT_TIMESTAMP) == null || stateMap.get(CURRENT_KEY_PREFIX+"0") == null) {
-            currentTimestamp = 0L;
-            currentKeys = new HashSet<>();
+            forcefullyUpdateListing(0L, Collections.emptySet());
         } else {
-            currentTimestamp = Long.parseLong(stateMap.get(CURRENT_TIMESTAMP));
-            currentKeys = extractKeys(stateMap);
+            final long timestamp = Long.parseLong(stateMap.get(CURRENT_TIMESTAMP));
+            final Set<String> keys = extractKeys(stateMap);
+            forcefullyUpdateListing(timestamp, keys);
         }
+    }
+
+    private void updateListingIfNewer(final long timestamp, final Set<String> keys) {
+        final ListingSnapshot updatedListing = new ListingSnapshot(timestamp, keys);
+        listing.getAndUpdate(current -> current.getTimestamp() > timestamp ? current : updatedListing);
+    }
+
+    private void forcefullyUpdateListing(final long timestamp, final Set<String> keys) {
+        final ListingSnapshot updatedListing = new ListingSnapshot(timestamp, keys);
+        listing.set(updatedListing);
     }
 
     private void persistState(final ProcessSession session, final long timestamp, final Collection<String> keys) {
@@ -329,37 +343,23 @@ public class ListS3 extends AbstractS3Processor {
             return;
         }
 
+        final AmazonS3 client = getClient();
+
+        S3BucketLister bucketLister = getS3BucketLister(context, client);
+
         final long startNanos = System.nanoTime();
-        final String bucket = context.getProperty(BUCKET).evaluateAttributeExpressions().getValue();
         final long minAgeMilliseconds = context.getProperty(MIN_AGE).asTimePeriod(TimeUnit.MILLISECONDS);
         final long listingTimestamp = System.currentTimeMillis();
-        final boolean requesterPays = context.getProperty(REQUESTER_PAYS).asBoolean();
+
+        final String bucket = context.getProperty(BUCKET).evaluateAttributeExpressions().getValue();
         final int batchSize = context.getProperty(BATCH_SIZE).asInteger();
 
-        final AmazonS3 client = getClient();
+        final ListingSnapshot currentListing = listing.get();
+        final long currentTimestamp = currentListing.getTimestamp();
+        final Set<String> currentKeys = currentListing.getKeys();
         int listCount = 0;
         int totalListCount = 0;
         long latestListedTimestampInThisCycle = currentTimestamp;
-        String delimiter = context.getProperty(DELIMITER).getValue();
-        String prefix = context.getProperty(PREFIX).evaluateAttributeExpressions().getValue();
-
-        boolean useVersions = context.getProperty(USE_VERSIONS).asBoolean();
-        int listType = context.getProperty(LIST_TYPE).asInteger();
-        S3BucketLister bucketLister = useVersions
-                ? new S3VersionBucketLister(client)
-                : listType == 2
-                    ? new S3ObjectBucketListerVersion2(client)
-                    : new S3ObjectBucketLister(client);
-
-        bucketLister.setBucketName(bucket);
-        bucketLister.setRequesterPays(requesterPays);
-
-        if (delimiter != null && !delimiter.isEmpty()) {
-            bucketLister.setDelimiter(delimiter);
-        }
-        if (prefix != null && !prefix.isEmpty()) {
-            bucketLister.setPrefix(prefix);
-        }
 
         VersionListing versionListing;
         final Set<String> listedKeys = new HashSet<>();
@@ -432,7 +432,7 @@ public class ListS3 extends AbstractS3Processor {
 
                     if (listCount >= batchSize && writer.isCheckpoint()) {
                         getLogger().info("Successfully listed {} new files from S3; routing to success", new Object[] {listCount});
-                        session.commit();
+                        session.commitAsync();
                     }
 
                     listCount = 0;
@@ -454,11 +454,11 @@ public class ListS3 extends AbstractS3Processor {
         updatedKeys.addAll(listedKeys);
 
         persistState(session, latestListedTimestampInThisCycle, updatedKeys);
-        session.commit();
 
-        // Update currentKeys.
-        currentKeys = updatedKeys;
-        currentTimestamp = latestListedTimestampInThisCycle;
+        final long latestListed = latestListedTimestampInThisCycle;
+        session.commitAsync(() -> {
+            updateListingIfNewer(latestListed, updatedKeys);
+        });
 
         final long listMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
         getLogger().info("Successfully listed S3 bucket {} in {} millis", new Object[]{bucket, listMillis});
@@ -469,6 +469,33 @@ public class ListS3 extends AbstractS3Processor {
         }
     }
 
+    private S3BucketLister getS3BucketLister(final ProcessContext context, final AmazonS3 client) {
+        final boolean requesterPays = context.getProperty(REQUESTER_PAYS).asBoolean();
+        final boolean useVersions = context.getProperty(USE_VERSIONS).asBoolean();
+
+        final String bucket = context.getProperty(BUCKET).evaluateAttributeExpressions().getValue();
+        final String delimiter = context.getProperty(DELIMITER).getValue();
+        final String prefix = context.getProperty(PREFIX).evaluateAttributeExpressions().getValue();
+
+        final int listType = context.getProperty(LIST_TYPE).asInteger();
+
+        final S3BucketLister bucketLister = useVersions
+                ? new S3VersionBucketLister(client)
+                : listType == 2
+                ? new S3ObjectBucketListerVersion2(client)
+                : new S3ObjectBucketLister(client);
+
+        bucketLister.setBucketName(bucket);
+        bucketLister.setRequesterPays(requesterPays);
+
+        if (delimiter != null && !delimiter.isEmpty()) {
+            bucketLister.setDelimiter(delimiter);
+        }
+        if (prefix != null && !prefix.isEmpty()) {
+            bucketLister.setPrefix(prefix);
+        }
+        return bucketLister;
+    }
 
     private interface S3BucketLister {
         void setBucketName(String bucketName);
@@ -852,5 +879,90 @@ public class ListS3 extends AbstractS3Processor {
         public boolean isCheckpoint() {
             return true;
         }
+    }
+
+    private static class ListingSnapshot {
+        private final long timestamp;
+        private final Set<String> keys;
+
+        public ListingSnapshot(final long timestamp, final Set<String> keys) {
+            this.timestamp = timestamp;
+            this.keys = keys;
+        }
+
+        public long getTimestamp() {
+            return timestamp;
+        }
+
+        public Set<String> getKeys() {
+            return keys;
+        }
+    }
+
+    @Override
+    public List<ConfigVerificationResult> verify(final ProcessContext context, final ComponentLog logger, final Map<String, String> attributes) {
+        final ControllerService service = context.getProperty(AWS_CREDENTIALS_PROVIDER_SERVICE).asControllerService();
+        final AmazonS3Client client = service != null ? createClient(context, getCredentialsProvider(context), createConfiguration(context))
+            : createClient(context, getCredentials(context), createConfiguration(context));
+
+        getRegionAndInitializeEndpoint(context, client);
+
+        final List<ConfigVerificationResult> results = new ArrayList<>();
+        final String bucketName = context.getProperty(BUCKET).evaluateAttributeExpressions().getValue();
+        final long minAgeMilliseconds = context.getProperty(MIN_AGE).asTimePeriod(TimeUnit.MILLISECONDS);
+
+        if (bucketName == null || bucketName.trim().isEmpty()) {
+            results.add(new ConfigVerificationResult.Builder()
+                .verificationStepName("Perform Listing")
+                .outcome(Outcome.FAILED)
+                .explanation("Bucket Name must be specified")
+                .build());
+
+            return results;
+        }
+
+        final S3BucketLister bucketLister = getS3BucketLister(context, client);
+        final long listingTimestamp = System.currentTimeMillis();
+
+        // Attempt to perform a listing of objects in the S3 bucket
+        try {
+            int listCount = 0;
+            int totalListCount = 0;
+            VersionListing versionListing;
+            do {
+                versionListing = bucketLister.listVersions();
+                for (final S3VersionSummary versionSummary : versionListing.getVersionSummaries()) {
+                    long lastModified = versionSummary.getLastModified().getTime();
+                    if (lastModified > (listingTimestamp - minAgeMilliseconds)) {
+                        continue;
+                    }
+
+                    listCount++;
+                }
+                bucketLister.setNextMarker();
+
+                totalListCount += listCount;
+
+                listCount = 0;
+            } while (bucketLister.isTruncated());
+
+            results.add(new ConfigVerificationResult.Builder()
+                .verificationStepName("Perform Listing")
+                .outcome(Outcome.SUCCESSFUL)
+                .explanation("Successfully listed contents of bucket '" + bucketName + "', finding " + totalListCount + " objects matching the filter")
+                .build());
+
+            logger.info("Successfully verified configuration");
+        } catch (final Exception e) {
+            logger.warn("Failed to verify configuration. Could not list contents of bucket '{}'", bucketName, e);
+
+            results.add(new ConfigVerificationResult.Builder()
+                .verificationStepName("Perform Listing")
+                .outcome(Outcome.FAILED)
+                .explanation("Failed to list contents of bucket '" + bucketName + "': " + e.getMessage())
+                .build());
+        }
+
+        return results;
     }
 }

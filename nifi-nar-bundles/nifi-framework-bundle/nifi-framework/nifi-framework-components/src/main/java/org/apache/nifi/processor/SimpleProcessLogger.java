@@ -19,20 +19,31 @@ package org.apache.nifi.processor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.logging.LogLevel;
+import org.apache.nifi.logging.LogMessage;
 import org.apache.nifi.logging.LogRepository;
 import org.apache.nifi.logging.LogRepositoryFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.LinkedList;
+import java.util.stream.Collectors;
+
 public class SimpleProcessLogger implements ComponentLog {
+
+    public static final String NEW_LINE_ARROW = "\u21B3";
+    public static final String CAUSES = NEW_LINE_ARROW + " causes: ";
 
     private final Logger logger;
     private final LogRepository logRepository;
     private final Object component;
 
     public SimpleProcessLogger(final String componentId, final Object component) {
+        this(component, LogRepositoryFactory.getRepository(componentId));
+    }
+
+    public SimpleProcessLogger(final Object component, final LogRepository logRepository) {
         this.logger = LoggerFactory.getLogger(component.getClass());
-        this.logRepository = LogRepositoryFactory.getRepository(componentId);
+        this.logRepository = logRepository;
         this.component = component;
     }
 
@@ -58,7 +69,7 @@ public class SimpleProcessLogger implements ComponentLog {
         }
 
         msg = "{} " + msg;
-        final Object[] os = {component, t.toString(), t};
+        final Object[] os = {component, getCauses(t), t};
         logger.warn(msg, os);
         logRepository.addLogMessage(LogLevel.WARN, msg, os, t);
     }
@@ -85,7 +96,7 @@ public class SimpleProcessLogger implements ComponentLog {
             return;
         }
 
-        os = addProcessorAndThrowable(os, t, logger.isDebugEnabled());
+        os = addProcessorAndThrowable(os, t);
         msg = "{} " + msg + ": {}";
         logger.warn(msg, os);
         logRepository.addLogMessage(LogLevel.WARN, msg, os, t);
@@ -104,13 +115,21 @@ public class SimpleProcessLogger implements ComponentLog {
     }
 
     @Override
+    public void warn(LogMessage logMessage) {
+        if (isWarnEnabled()) {
+            log(LogLevel.WARN, logMessage);
+            logRepository.addLogMessage(logMessage);
+        }
+    }
+
+    @Override
     public void trace(String msg, Throwable t) {
         if (!isTraceEnabled()) {
             return;
         }
 
         msg = "{} " + msg;
-        final Object[] os = {component, t.toString(), t};
+        final Object[] os = {component, getCauses(t), t};
         logger.trace(msg, os);
         logRepository.addLogMessage(LogLevel.TRACE, msg, os, t);
     }
@@ -145,11 +164,19 @@ public class SimpleProcessLogger implements ComponentLog {
             return;
         }
 
-        os = addProcessorAndThrowable(os, t, true);
+        os = addProcessorAndThrowable(os, t);
         msg = "{} " + msg + ": {}";
 
         logger.trace(msg, os);
         logRepository.addLogMessage(LogLevel.TRACE, msg, os, t);
+    }
+
+    @Override
+    public void trace(LogMessage logMessage) {
+        if (isTraceEnabled()) {
+            log(LogLevel.TRACE, logMessage);
+            logRepository.addLogMessage(logMessage);
+        }
     }
 
     @Override
@@ -184,7 +211,7 @@ public class SimpleProcessLogger implements ComponentLog {
         }
 
         msg = "{} " + msg;
-        final Object[] os = {component, t.toString()};
+        final Object[] os = {component, getCauses(t)};
 
         logger.info(msg, os);
         if (logger.isDebugEnabled()) {
@@ -225,11 +252,19 @@ public class SimpleProcessLogger implements ComponentLog {
             return;
         }
 
-        os = addProcessorAndThrowable(os, t, logger.isDebugEnabled());
+        os = addProcessorAndThrowable(os, t);
         msg = "{} " + msg + ": {}";
 
         logger.info(msg, os);
         logRepository.addLogMessage(LogLevel.INFO, msg, os, t);
+    }
+
+    @Override
+    public void info(LogMessage logMessage) {
+        if (isInfoEnabled()) {
+            log(LogLevel.INFO, logMessage);
+            logRepository.addLogMessage(logMessage);
+        }
     }
 
     @Override
@@ -245,12 +280,12 @@ public class SimpleProcessLogger implements ComponentLog {
 
         if (t == null) {
             msg = "{} " + msg;
-            final Object[] os = new Object[] {component};
+            final Object[] os = new Object[]{component};
             logger.error(msg, os);
             logRepository.addLogMessage(LogLevel.ERROR, msg, os);
         } else {
             msg = "{} " + msg + ": {}";
-            final Object[] os = new Object[] {component, t.toString(), t};
+            final Object[] os = new Object[]{component, getCauses(t), t};
             logger.error(msg, os);
             logRepository.addLogMessage(LogLevel.ERROR, msg, os, t);
         }
@@ -283,16 +318,24 @@ public class SimpleProcessLogger implements ComponentLog {
             return;
         }
 
-        os = addProcessorAndThrowable(os, t, true);
+        os = addProcessorAndThrowable(os, t);
         msg = "{} " + msg + ": {}";
 
         logger.error(msg, os);
         logRepository.addLogMessage(LogLevel.ERROR, msg, os, t);
     }
 
-    private Object[] addProcessorAndThrowable(final Object[] os, final Throwable t, final boolean includeStackTrace) {
+    @Override
+    public void error(LogMessage logMessage) {
+        if (isErrorEnabled()) {
+            log(LogLevel.ERROR, logMessage);
+            logRepository.addLogMessage(logMessage);
+        }
+    }
+
+    private Object[] addProcessorAndThrowable(final Object[] os, final Throwable t) {
         final Object[] modifiedArgs;
-        if (t == null || !includeStackTrace) {
+        if (t == null) {
             modifiedArgs = new Object[os.length + 2];
             modifiedArgs[0] = component.toString();
             System.arraycopy(os, 0, modifiedArgs, 1, os.length);
@@ -301,7 +344,7 @@ public class SimpleProcessLogger implements ComponentLog {
             modifiedArgs = new Object[os.length + 3];
             modifiedArgs[0] = component.toString();
             System.arraycopy(os, 0, modifiedArgs, 1, os.length);
-            modifiedArgs[modifiedArgs.length - 2] = t.toString();
+            modifiedArgs[modifiedArgs.length - 2] = getCauses(t);
             modifiedArgs[modifiedArgs.length - 1] = t;
         }
 
@@ -340,7 +383,7 @@ public class SimpleProcessLogger implements ComponentLog {
             return;
         }
 
-        os = addProcessorAndThrowable(os, t, true);
+        os = addProcessorAndThrowable(os, t);
         msg = "{} " + msg + ": {}";
 
         logger.debug(msg, os);
@@ -358,6 +401,14 @@ public class SimpleProcessLogger implements ComponentLog {
 
         logger.debug(msg, os);
         logRepository.addLogMessage(LogLevel.DEBUG, msg, os);
+    }
+
+    @Override
+    public void debug(LogMessage logMessage) {
+        if (isDebugEnabled()) {
+            log(LogLevel.DEBUG, logMessage);
+            logRepository.addLogMessage(logMessage);
+        }
     }
 
     @Override
@@ -446,6 +497,36 @@ public class SimpleProcessLogger implements ComponentLog {
                 warn(msg, os, t);
                 break;
         }
+    }
+
+    @Override
+    public void log(LogMessage message) {
+        switch (message.getLogLevel()) {
+            case DEBUG:
+                debug(message);
+                break;
+            case ERROR:
+            case FATAL:
+                error(message);
+                break;
+            case INFO:
+                info(message);
+                break;
+            case TRACE:
+                trace(message);
+                break;
+            case WARN:
+                warn(message);
+                break;
+        }
+    }
+
+    private String getCauses(final Throwable throwable) {
+        final LinkedList<String> causes = new LinkedList<>();
+        for (Throwable t = throwable; t != null; t = t.getCause()) {
+            causes.push(t.toString());
+        }
+        return causes.stream().collect(Collectors.joining(System.lineSeparator() + CAUSES));
     }
 
 }

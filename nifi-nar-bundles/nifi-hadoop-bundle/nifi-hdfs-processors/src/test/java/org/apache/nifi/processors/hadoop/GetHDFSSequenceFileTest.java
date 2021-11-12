@@ -34,6 +34,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.File;
 import java.io.IOException;
 import java.security.PrivilegedExceptionAction;
+import java.util.List;
 
 import static org.junit.Assert.assertFalse;
 import static org.mockito.Mockito.mock;
@@ -42,7 +43,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 public class GetHDFSSequenceFileTest {
-    private AbstractHadoopProcessor.HdfsResources hdfsResources;
+    private HdfsResources hdfsResources;
     private GetHDFSSequenceFile getHDFSSequenceFile;
     private Configuration configuration;
     private FileSystem fileSystem;
@@ -54,7 +55,7 @@ public class GetHDFSSequenceFileTest {
         configuration = mock(Configuration.class);
         fileSystem = mock(FileSystem.class);
         userGroupInformation = mock(UserGroupInformation.class);
-        hdfsResources = new AbstractHadoopProcessor.HdfsResources(configuration, fileSystem, userGroupInformation, null);
+        hdfsResources = new HdfsResources(configuration, fileSystem, userGroupInformation, null);
         getHDFSSequenceFile = new TestableGetHDFSSequenceFile();
         getHDFSSequenceFile.kerberosProperties = mock(KerberosProperties.class);
         reloginTried = false;
@@ -85,7 +86,7 @@ public class GetHDFSSequenceFileTest {
 
     @Test
     public void testGetFlowFilesNoUgiShouldntCallDoAs() throws Exception {
-        hdfsResources = new AbstractHadoopProcessor.HdfsResources(configuration, fileSystem, null, null);
+        hdfsResources = new HdfsResources(configuration, fileSystem, null, null);
         init();
         SequenceFileReader reader = mock(SequenceFileReader.class);
         Path file = mock(Path.class);
@@ -95,7 +96,7 @@ public class GetHDFSSequenceFileTest {
 
     public class TestableGetHDFSSequenceFile extends GetHDFSSequenceFile {
         @Override
-        HdfsResources resetHDFSResources(String configResources, ProcessContext context) throws IOException {
+        HdfsResources resetHDFSResources(final List<String> resourceLocations, ProcessContext context) throws IOException {
             return hdfsResources;
         }
 

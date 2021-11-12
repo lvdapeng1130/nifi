@@ -55,6 +55,8 @@ import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
+import org.apache.nifi.components.resource.ResourceCardinality;
+import org.apache.nifi.components.resource.ResourceType;
 import org.apache.nifi.components.state.Scope;
 import org.apache.nifi.context.PropertyContext;
 import org.apache.nifi.controller.ConfigurationContext;
@@ -189,7 +191,7 @@ public class ReportLineageToAtlas extends AbstractReportingTask {
                     " then, 'atlas-application.properties' file under root classpath is used.")
             .required(false)
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
-            .addValidator(StandardValidators.NON_BLANK_VALIDATOR)
+            .identifiesExternalResource(ResourceCardinality.SINGLE, ResourceType.DIRECTORY)
             // Atlas generates ssl-client.xml in this directory and then loads it from classpath
             .dynamicallyModifiesClasspath(true)
             .build();
@@ -280,7 +282,7 @@ public class ReportLineageToAtlas extends AbstractReportingTask {
                     " If not set, it is expected to set a JAAS configuration file in the JVM properties defined in the bootstrap.conf file." +
                     " This principal will be set into 'sasl.jaas.config' Kafka's property.")
             .required(false)
-            .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+            .identifiesExternalResource(ResourceCardinality.SINGLE, ResourceType.FILE)
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
     public static final PropertyDescriptor KERBEROS_CREDENTIALS_SERVICE = new PropertyDescriptor.Builder()
@@ -812,46 +814,46 @@ public class ReportLineageToAtlas extends AbstractReportingTask {
         // If standalone or being primary node in a NiFi cluster, this node is responsible for doing primary tasks.
         final boolean isResponsibleForPrimaryTasks = !isClustered || getNodeTypeProvider().isPrimary();
 
-        final NiFiAtlasClient atlasClient = createNiFiAtlasClient(context);
+        try (final NiFiAtlasClient atlasClient = createNiFiAtlasClient(context)) {
 
-        // Create Entity defs in Atlas if there's none yet.
-        if (!isTypeDefCreated) {
-            try {
-                if (isResponsibleForPrimaryTasks) {
-                    // Create NiFi type definitions in Atlas type system.
-                    atlasClient.registerNiFiTypeDefs(false);
-                } else {
-                    // Otherwise, just check existence of NiFi type definitions.
-                    if (!atlasClient.isNiFiTypeDefsRegistered()) {
-                        getLogger().debug("NiFi type definitions are not ready in Atlas type system yet.");
-                        return;
+            // Create Entity defs in Atlas if there's none yet.
+            if (!isTypeDefCreated) {
+                try {
+                    if (isResponsibleForPrimaryTasks) {
+                        // Create NiFi type definitions in Atlas type system.
+                        atlasClient.registerNiFiTypeDefs(false);
+                    } else {
+                        // Otherwise, just check existence of NiFi type definitions.
+                        if (!atlasClient.isNiFiTypeDefsRegistered()) {
+                            getLogger().debug("NiFi type definitions are not ready in Atlas type system yet.");
+                            return;
+                        }
                     }
+                    isTypeDefCreated = true;
+                } catch (AtlasServiceException e) {
+                    throw new RuntimeException("Failed to check and create NiFi flow type definitions in Atlas due to " + e, e);
                 }
-                isTypeDefCreated = true;
-            } catch (AtlasServiceException e) {
-                throw new RuntimeException("Failed to check and create NiFi flow type definitions in Atlas due to " + e, e);
             }
-        }
 
-        // Regardless of whether being a primary task node, each node has to analyse NiFiFlow.
-        // Assuming each node has the same flow definition, that is guaranteed by NiFi cluster management mechanism.
-        final NiFiFlow nifiFlow = createNiFiFlow(context, atlasClient);
+            // Regardless of whether being a primary task node, each node has to analyse NiFiFlow.
+            // Assuming each node has the same flow definition, that is guaranteed by NiFi cluster management mechanism.
+            final NiFiFlow nifiFlow = createNiFiFlow(context, atlasClient);
 
 
-        if (isResponsibleForPrimaryTasks) {
-            try {
-                atlasClient.registerNiFiFlow(nifiFlow);
-            } catch (AtlasServiceException e) {
-                throw new RuntimeException("Failed to register NiFI flow. " + e, e);
+            if (isResponsibleForPrimaryTasks) {
+                try {
+                    atlasClient.registerNiFiFlow(nifiFlow);
+                } catch (AtlasServiceException e) {
+                    throw new RuntimeException("Failed to register NiFI flow. " + e, e);
+                }
             }
+
+            // NOTE: There is a race condition between the primary node and other nodes.
+            // If a node notifies an event related to a NiFi component which is not yet created by NiFi primary node,
+            // then the notification message will fail due to having a reference to a non-existing entity.
+            nifiAtlasHook.setAtlasClient(atlasClient);
+            consumeNiFiProvenanceEvents(context, nifiFlow);
         }
-
-        // NOTE: There is a race condition between the primary node and other nodes.
-        // If a node notifies an event related to a NiFi component which is not yet created by NiFi primary node,
-        // then the notification message will fail due to having a reference to a non-existing entity.
-        nifiAtlasHook.setAtlasClient(atlasClient);
-        consumeNiFiProvenanceEvents(context, nifiFlow);
-
     }
 
     private NiFiFlow createNiFiFlow(ReportingContext context, NiFiAtlasClient atlasClient) {

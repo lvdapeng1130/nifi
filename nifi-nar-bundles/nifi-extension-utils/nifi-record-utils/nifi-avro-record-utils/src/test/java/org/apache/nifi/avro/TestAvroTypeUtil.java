@@ -17,11 +17,13 @@
 
 package org.apache.nifi.avro;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.avro.Conversions;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
+import org.apache.avro.SchemaBuilder;
 import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericData.Record;
@@ -30,7 +32,6 @@ import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.generic.GenericRecordBuilder;
 import org.apache.avro.util.Utf8;
-import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.SimpleRecordSchema;
 import org.apache.nifi.serialization.record.DataType;
 import org.apache.nifi.serialization.record.MapRecord;
@@ -39,6 +40,7 @@ import org.apache.nifi.serialization.record.RecordFieldType;
 import org.apache.nifi.serialization.record.RecordSchema;
 import org.apache.nifi.serialization.record.type.RecordDataType;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -50,13 +52,11 @@ import java.sql.Date;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -70,7 +70,60 @@ import static org.junit.Assert.fail;
 public class TestAvroTypeUtil {
 
     @Test
-    public void testCreateAvroSchemaPrimitiveTypes() throws SchemaNotFoundException {
+    @Ignore("Performance test meant for manually testing only before/after changes in order to measure performance difference caused by changes.")
+    public void testCreateAvroRecordPerformance() throws IOException {
+        final List<RecordField> fields = new ArrayList<>();
+        for (int i=0; i < 100; i++) {
+            fields.add(new RecordField("field" + i, RecordFieldType.STRING.getDataType(), true));
+        }
+
+        final RecordSchema recordSchema = new SimpleRecordSchema(fields);
+        final Schema avroSchema = AvroTypeUtil.extractAvroSchema(recordSchema);
+
+        final Map<String, Object> values = new HashMap<>();
+        for (int i=0; i < 100; i++) {
+            // Leave half of the values null
+            if (i % 2 == 0) {
+                values.put("field" + i, String.valueOf(i));
+            }
+        }
+
+        final MapRecord record = new MapRecord(recordSchema, values);
+
+        final int iterations = 1_000_000;
+
+        for (int j=0; j < 1_000; j++) {
+            final long start = System.currentTimeMillis();
+
+            for (int i = 0; i < iterations; i++) {
+                AvroTypeUtil.createAvroRecord(record, avroSchema);
+            }
+
+            final long millis = System.currentTimeMillis() - start;
+            System.out.println(millis);
+        }
+    }
+
+    @Test
+    public void testAvroDefaultValueWithNoFieldInRecordOrSchema() throws IOException {
+        final List<RecordField> fields = new ArrayList<>();
+        fields.add(new RecordField("name", RecordFieldType.STRING.getDataType()));
+        final RecordSchema personSchema = new SimpleRecordSchema(fields);
+
+        final org.apache.nifi.serialization.record.Record record = new MapRecord(personSchema, Collections.singletonMap("name", "John Doe"));
+        final Schema avroSchema = SchemaBuilder.record("person").namespace("nifi")
+            .fields()
+                .requiredString("name")
+                .name("color").type().stringType().stringDefault("blue")
+            .endRecord();
+
+        final GenericRecord avroRecord = AvroTypeUtil.createAvroRecord(record, avroSchema);
+        assertEquals("John Doe", avroRecord.get("name"));
+        assertEquals("blue", avroRecord.get("color"));
+    }
+
+    @Test
+    public void testCreateAvroSchemaPrimitiveTypes() {
         final List<RecordField> fields = new ArrayList<>();
         fields.add(new RecordField("int", RecordFieldType.INT.getDataType()));
         fields.add(new RecordField("long", RecordFieldType.LONG.getDataType()));
@@ -484,17 +537,15 @@ public class TestAvroTypeUtil {
 
     @Test
     public void testDateConversion() {
-        final Calendar c = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        c.set(2019, Calendar.JANUARY, 1, 0, 0, 0);
-        c.set(Calendar.MILLISECOND, 0);
-        final long epochMillis = c.getTimeInMillis();
+        final String date = "2019-01-01";
 
         final LogicalTypes.Date dateType = LogicalTypes.date();
         final Schema fieldSchema = Schema.create(Type.INT);
         dateType.addToSchema(fieldSchema);
-        final Object convertedValue = AvroTypeUtil.convertToAvroObject(new Date(epochMillis), fieldSchema);
+        final Object convertedValue = AvroTypeUtil.convertToAvroObject(Date.valueOf(date), fieldSchema);
         assertTrue(convertedValue instanceof Integer);
-        assertEquals(LocalDate.of(2019, 1, 1).toEpochDay(), (int) convertedValue);
+        final int epochDay = (int) LocalDate.parse(date).toEpochDay();
+        assertEquals(epochDay, convertedValue);
     }
 
     @Test
@@ -855,6 +906,108 @@ public class TestAvroTypeUtil {
         // WHEN
         // THEN
         testSchemaWithReoccurringFieldName(reoccurringFieldName, childRecord11Fields, childRecord21Fields, expected);
+    }
+
+    @Test
+    public void testSchemaWithArrayOfRecordsThatContainDifferentChildRecordForSameField() throws Exception {
+        // GIVEN
+        SimpleRecordSchema recordSchema1 = new SimpleRecordSchema(Arrays.asList(
+            new RecordField("integer", RecordFieldType.INT.getDataType()),
+            new RecordField("boolean", RecordFieldType.BOOLEAN.getDataType())
+        ));
+        SimpleRecordSchema recordSchema2 = new SimpleRecordSchema(Arrays.asList(
+            new RecordField("integer", RecordFieldType.INT.getDataType()),
+            new RecordField("string", RecordFieldType.STRING.getDataType())
+        ));
+
+        RecordSchema recordChoiceSchema = new SimpleRecordSchema(Arrays.asList(
+            new RecordField("record", RecordFieldType.CHOICE.getChoiceDataType(
+                RecordFieldType.RECORD.getRecordDataType(recordSchema1),
+                RecordFieldType.RECORD.getRecordDataType(recordSchema2)
+            ))
+        ));
+
+        RecordSchema schema = new SimpleRecordSchema(Arrays.asList(
+            new RecordField("dataCollection", RecordFieldType.ARRAY.getArrayDataType(
+                RecordFieldType.RECORD.getRecordDataType(recordChoiceSchema)
+            )
+        )));
+
+        String expected = "{\n" +
+            "  \"type\": \"record\",\n" +
+            "  \"name\": \"nifiRecord\",\n" +
+            "  \"namespace\": \"org.apache.nifi\",\n" +
+            "  \"fields\": [\n" +
+            "    {\n" +
+            "      \"name\": \"dataCollection\",\n" +
+            "      \"type\": [\n" +
+            "        \"null\",\n" +
+            "        {\n" +
+            "          \"type\": \"array\",\n" +
+            "          \"items\": {\n" +
+            "            \"type\": \"record\",\n" +
+            "            \"name\": \"dataCollectionType\",\n" +
+            "            \"fields\": [\n" +
+            "              {\n" +
+            "                \"name\": \"record\",\n" +
+            "                \"type\": [\n" +
+            "                  {\n" +
+            "                    \"type\": \"record\",\n" +
+            "                    \"name\": \"dataCollection_recordType\",\n" +
+            "                    \"fields\": [\n" +
+            "                      {\n" +
+            "                        \"name\": \"integer\",\n" +
+            "                        \"type\": [\n" +
+            "                          \"null\",\n" +
+            "                          \"int\"\n" +
+            "                        ]\n" +
+            "                      },\n" +
+            "                      {\n" +
+            "                        \"name\": \"boolean\",\n" +
+            "                        \"type\": [\n" +
+            "                          \"null\",\n" +
+            "                          \"boolean\"\n" +
+            "                        ]\n" +
+            "                      }\n" +
+            "                    ]\n" +
+            "                  },\n" +
+            "                  {\n" +
+            "                    \"type\": \"record\",\n" +
+            "                    \"name\": \"dataCollection_record2Type\",\n" +
+            "                    \"fields\": [\n" +
+            "                      {\n" +
+            "                        \"name\": \"integer\",\n" +
+            "                        \"type\": [\n" +
+            "                          \"null\",\n" +
+            "                          \"int\"\n" +
+            "                        ]\n" +
+            "                      },\n" +
+            "                      {\n" +
+            "                        \"name\": \"string\",\n" +
+            "                        \"type\": [\n" +
+            "                          \"null\",\n" +
+            "                          \"string\"\n" +
+            "                        ]\n" +
+            "                      }\n" +
+            "                    ]\n" +
+            "                  },\n" +
+            "                  \"null\"\n" +
+            "                ]\n" +
+            "              }\n" +
+            "            ]\n" +
+            "          }\n" +
+            "        }\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}";
+
+        // WHEN
+        Schema actual = AvroTypeUtil.extractAvroSchema(schema);
+
+        // THEN
+        ObjectMapper mapper = new ObjectMapper();
+        assertEquals(mapper.readTree(expected), mapper.readTree(actual.toString()));
     }
 
     private void testSchemaWithReoccurringFieldName(String reoccurringFieldName, List<RecordField> childRecord11Fields, List<RecordField> childRecord21Fields, String expected) {

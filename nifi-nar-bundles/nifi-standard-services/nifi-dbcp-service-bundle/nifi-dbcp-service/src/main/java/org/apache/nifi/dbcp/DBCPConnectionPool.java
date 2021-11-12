@@ -21,6 +21,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.apache.nifi.annotation.behavior.DynamicProperties;
 import org.apache.nifi.annotation.behavior.DynamicProperty;
+import org.apache.nifi.annotation.behavior.RequiresInstanceClassLoading;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnDisabled;
@@ -29,22 +30,24 @@ import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
+import org.apache.nifi.components.resource.ResourceCardinality;
+import org.apache.nifi.components.resource.ResourceType;
 import org.apache.nifi.controller.AbstractControllerService;
 import org.apache.nifi.controller.ConfigurationContext;
 import org.apache.nifi.expression.AttributeExpression;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.kerberos.KerberosCredentialsService;
+import org.apache.nifi.kerberos.KerberosUserService;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.reporting.InitializationException;
 import org.apache.nifi.security.krb.KerberosAction;
 import org.apache.nifi.security.krb.KerberosKeytabUser;
+import org.apache.nifi.security.krb.KerberosLoginException;
 import org.apache.nifi.security.krb.KerberosPasswordUser;
 import org.apache.nifi.security.krb.KerberosUser;
-import org.apache.nifi.util.file.classloader.ClassLoaderUtils;
 
 import javax.security.auth.login.LoginException;
-import java.net.MalformedURLException;
 import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.DriverManager;
@@ -72,6 +75,7 @@ import java.util.stream.Collectors;
                 expressionLanguageScope = ExpressionLanguageScope.NONE,
                 description = "JDBC driver property name prefixed with 'SENSITIVE.' handled as a sensitive property.")
 })
+@RequiresInstanceClassLoading
 public class DBCPConnectionPool extends AbstractControllerService implements DBCPService {
     /** Property Name Prefix for Sensitive Dynamic Properties */
     protected static final String SENSITIVE_PROPERTY_PREFIX = "SENSITIVE.";
@@ -127,8 +131,9 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
         .description("Comma-separated list of files/folders and/or URLs containing the driver JAR and its dependencies (if any). For example '/var/tmp/mariadb-java-client-1.1.7.jar'")
         .defaultValue(null)
         .required(false)
-        .addValidator(StandardValidators.createListValidator(true, true, StandardValidators.createURLorFileValidator()))
+        .identifiesExternalResource(ResourceCardinality.MULTIPLE, ResourceType.FILE, ResourceType.DIRECTORY, ResourceType.URL)
         .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
+        .dynamicallyModifiesClasspath(true)
         .build();
 
     public static final PropertyDescriptor DB_USER = new PropertyDescriptor.Builder()
@@ -261,6 +266,14 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
             .required(false)
             .build();
 
+    public static final PropertyDescriptor KERBEROS_USER_SERVICE = new PropertyDescriptor.Builder()
+            .name("kerberos-user-service")
+            .displayName("Kerberos User Service")
+            .description("Specifies the Kerberos User Controller Service that should be used for authenticating with Kerberos")
+            .identifiesControllerService(KerberosUserService.class)
+            .required(false)
+            .build();
+
     public static final PropertyDescriptor KERBEROS_PRINCIPAL = new PropertyDescriptor.Builder()
             .name("kerberos-principal")
             .displayName("Kerberos Principal")
@@ -287,6 +300,7 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
         props.add(DATABASE_URL);
         props.add(DB_DRIVERNAME);
         props.add(DB_DRIVER_LOCATION);
+        props.add(KERBEROS_USER_SERVICE);
         props.add(KERBEROS_CREDENTIALS_SERVICE);
         props.add(KERBEROS_PRINCIPAL);
         props.add(KERBEROS_PASSWORD);
@@ -355,12 +369,29 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
         }
 
         final KerberosCredentialsService kerberosCredentialsService = context.getProperty(KERBEROS_CREDENTIALS_SERVICE).asControllerService(KerberosCredentialsService.class);
+        final KerberosUserService kerberosUserService = context.getProperty(KERBEROS_USER_SERVICE).asControllerService(KerberosUserService.class);
 
         if (kerberosCredentialsService != null && (kerberosPrincipalProvided || kerberosPasswordProvided)) {
             results.add(new ValidationResult.Builder()
                     .subject(KERBEROS_CREDENTIALS_SERVICE.getDisplayName())
                     .valid(false)
                     .explanation("kerberos principal/password and kerberos credential service cannot be configured at the same time")
+                    .build());
+        }
+
+        if (kerberosUserService != null && (kerberosPrincipalProvided || kerberosPasswordProvided)) {
+            results.add(new ValidationResult.Builder()
+                    .subject(KERBEROS_USER_SERVICE.getDisplayName())
+                    .valid(false)
+                    .explanation("kerberos principal/password and kerberos user service cannot be configured at the same time")
+                    .build());
+        }
+
+        if (kerberosUserService != null && kerberosCredentialsService != null) {
+            results.add(new ValidationResult.Builder()
+                    .subject(KERBEROS_USER_SERVICE.getDisplayName())
+                    .valid(false)
+                    .explanation("kerberos user service and kerberos credential service cannot be configured at the same time")
                     .build());
         }
 
@@ -384,9 +415,10 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
     @OnEnabled
     public void onConfigured(final ConfigurationContext context) throws InitializationException {
 
-        final String drv = context.getProperty(DB_DRIVERNAME).evaluateAttributeExpressions().getValue();
+        final String driverName = context.getProperty(DB_DRIVERNAME).evaluateAttributeExpressions().getValue();
         final String user = context.getProperty(DB_USER).evaluateAttributeExpressions().getValue();
         final String passw = context.getProperty(DB_PASSWORD).evaluateAttributeExpressions().getValue();
+        final String dburl = context.getProperty(DATABASE_URL).evaluateAttributeExpressions().getValue();
         final Integer maxTotal = context.getProperty(MAX_TOTAL_CONNECTIONS).evaluateAttributeExpressions().asInteger();
         final String validationQuery = context.getProperty(VALIDATION_QUERY).evaluateAttributeExpressions().getValue();
         final Long maxWaitMillis = extractMillisWithInfinite(context.getProperty(MAX_WAIT_TIME).evaluateAttributeExpressions());
@@ -397,10 +429,13 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
         final Long minEvictableIdleTimeMillis = extractMillisWithInfinite(context.getProperty(MIN_EVICTABLE_IDLE_TIME).evaluateAttributeExpressions());
         final Long softMinEvictableIdleTimeMillis = extractMillisWithInfinite(context.getProperty(SOFT_MIN_EVICTABLE_IDLE_TIME).evaluateAttributeExpressions());
         final KerberosCredentialsService kerberosCredentialsService = context.getProperty(KERBEROS_CREDENTIALS_SERVICE).asControllerService(KerberosCredentialsService.class);
+        final KerberosUserService kerberosUserService = context.getProperty(KERBEROS_USER_SERVICE).asControllerService(KerberosUserService.class);
         final String kerberosPrincipal = context.getProperty(KERBEROS_PRINCIPAL).evaluateAttributeExpressions().getValue();
         final String kerberosPassword = context.getProperty(KERBEROS_PASSWORD).getValue();
 
-        if (kerberosCredentialsService != null) {
+        if (kerberosUserService != null) {
+            kerberosUser = kerberosUserService.createKerberosUser();
+        } else if (kerberosCredentialsService != null) {
             kerberosUser = new KerberosKeytabUser(kerberosCredentialsService.getPrincipal(), kerberosCredentialsService.getKeytab());
         } else if (!StringUtils.isBlank(kerberosPrincipal) && !StringUtils.isBlank(kerberosPassword)) {
             kerberosUser = new KerberosPasswordUser(kerberosPrincipal, kerberosPassword);
@@ -409,20 +444,13 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
         if (kerberosUser != null) {
             try {
                 kerberosUser.login();
-            } catch (LoginException e) {
+            } catch (KerberosLoginException e) {
                 throw new InitializationException("Unable to authenticate Kerberos principal", e);
             }
         }
 
         dataSource = new BasicDataSource();
-        dataSource.setDriverClassName(drv);
-
-        // Optional driver URL, when exist, this URL will be used to locate driver jar file location
-        final String urlString = context.getProperty(DB_DRIVER_LOCATION).evaluateAttributeExpressions().getValue();
-        dataSource.setDriverClassLoader(getDriverClassLoader(urlString, drv));
-
-        final String dburl = context.getProperty(DATABASE_URL).evaluateAttributeExpressions().getValue();
-
+        dataSource.setDriver(getDriver(driverName, dburl));
         dataSource.setMaxWaitMillis(maxWaitMillis);
         dataSource.setMaxTotal(maxTotal);
         dataSource.setMinIdle(minIdle);
@@ -458,45 +486,33 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
         });
     }
 
-    private Long extractMillisWithInfinite(PropertyValue prop) {
-        return "-1".equals(prop.getValue()) ? -1 : prop.asTimePeriod(TimeUnit.MILLISECONDS);
+    private Driver getDriver(final String driverName, final String url) {
+        final Class<?> clazz;
+
+        try {
+            clazz = Class.forName(driverName);
+        } catch (final ClassNotFoundException e) {
+            throw new ProcessException("Driver class " + driverName +  " is not found", e);
+        }
+
+        try {
+            return DriverManager.getDriver(url);
+        } catch (final SQLException e) {
+            // In case the driver is not registered by the implementation, we explicitly try to register it.
+            try {
+                final Driver driver = (Driver) clazz.newInstance();
+                DriverManager.registerDriver(driver);
+                return DriverManager.getDriver(url);
+            } catch (final SQLException e2) {
+                throw new ProcessException("No suitable driver for the given Database Connection URL", e2);
+            } catch (final IllegalAccessException | InstantiationException e2) {
+                throw new ProcessException("Creating driver instance is failed", e2);
+            }
+        }
     }
 
-    /**
-     * using Thread.currentThread().getContextClassLoader(); will ensure that you are using the ClassLoader for you NAR.
-     *
-     * @throws InitializationException
-     *             if there is a problem obtaining the ClassLoader
-     */
-    protected ClassLoader getDriverClassLoader(String locationString, String drvName) throws InitializationException {
-        if (locationString != null && locationString.length() > 0) {
-            try {
-                // Split and trim the entries
-                final ClassLoader classLoader = ClassLoaderUtils.getCustomClassLoader(
-                        locationString,
-                        this.getClass().getClassLoader(),
-                        (dir, name) -> name != null && name.endsWith(".jar")
-                );
-
-                // Workaround which allows to use URLClassLoader for JDBC driver loading.
-                // (Because the DriverManager will refuse to use a driver not loaded by the system ClassLoader.)
-                final Class<?> clazz = Class.forName(drvName, true, classLoader);
-                if (clazz == null) {
-                    throw new InitializationException("Can't load Database Driver " + drvName);
-                }
-                final Driver driver = (Driver) clazz.newInstance();
-                DriverManager.registerDriver(new DriverShim(driver));
-
-                return classLoader;
-            } catch (final MalformedURLException e) {
-                throw new InitializationException("Invalid Database Driver Jar Url", e);
-            } catch (final Exception e) {
-                throw new InitializationException("Can't load Database Driver", e);
-            }
-        } else {
-            // That will ensure that you are using the ClassLoader for you NAR.
-            return Thread.currentThread().getContextClassLoader();
-        }
+    private Long extractMillisWithInfinite(PropertyValue prop) {
+        return "-1".equals(prop.getValue()) ? -1 : prop.asTimePeriod(TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -511,7 +527,7 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
      * no exception while closing open connections
      */
     @OnDisabled
-    public void shutdown() throws SQLException, LoginException {
+    public void shutdown() throws SQLException {
         try {
             if (kerberosUser != null) {
                 kerberosUser.logout();
@@ -545,7 +561,7 @@ public class DBCPConnectionPool extends AbstractControllerService implements DBC
                 try {
                     getLogger().info("Error getting connection, performing Kerberos re-login");
                     kerberosUser.login();
-                } catch (LoginException le) {
+                } catch (KerberosLoginException le) {
                     throw new ProcessException("Unable to authenticate Kerberos principal", le);
                 }
             }

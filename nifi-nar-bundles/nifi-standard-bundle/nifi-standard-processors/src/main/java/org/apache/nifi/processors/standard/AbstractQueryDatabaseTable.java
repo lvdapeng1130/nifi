@@ -320,7 +320,7 @@ public abstract class AbstractQueryDatabaseTable extends AbstractDatabaseFetchPr
                         if (outputBatchSize > 0 && resultSetFlowFiles.size() >= outputBatchSize) {
                             session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
                             session.transfer(resultSetFlowFiles, REL_SUCCESS);
-                            session.commit();
+                            session.commitAsync();
                             resultSetFlowFiles.clear();
                         }
                     } else {
@@ -390,7 +390,7 @@ public abstract class AbstractQueryDatabaseTable extends AbstractDatabaseFetchPr
                 getLogger().error("{} failed to update State Manager, maximum observed values will not be recorded", new Object[]{this, ioe});
             }
 
-            session.commit();
+            session.commitAsync();
         }
     }
 

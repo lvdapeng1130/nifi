@@ -29,14 +29,16 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.Logger;
 
+import java.text.NumberFormat;
 import java.util.Arrays;
+import java.util.Locale;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 public class LongRunningTaskMonitorTest {
@@ -45,7 +47,6 @@ public class LongRunningTaskMonitorTest {
 
     @Test
     public void test() {
-        // GIVEN
         ThreadDetails threadDetails = mock(ThreadDetails.class);
 
         ActiveThreadInfo activeThreadInfo11 = mockActiveThreadInfo("Thread-11", 60_000);
@@ -82,33 +83,28 @@ public class LongRunningTaskMonitorTest {
             }
         };
 
-        // WHEN
         longRunningTaskMonitor.run();
-
-        // THEN
-        verify(longRunningTaskMonitorLogger).debug("Checking long running processor tasks...");
 
         ArgumentCaptor<String> logMessages = ArgumentCaptor.forClass(String.class);
         verify(longRunningTaskMonitorLogger, times(2)).warn(logMessages.capture());
         assertEquals("Long running task detected on processor [id=Processor-1-ID, name=Processor-1-Name, type=Processor-1-Type]. Task time: 60 seconds. Stack trace:\n" + STACKTRACE,
                 logMessages.getAllValues().get(0));
         assertEquals("Long running task detected on processor [id=Processor-2-ID, name=Processor-2-Name, type=Processor-2-Type]. Task time: 1,000 seconds. Stack trace:\n" + STACKTRACE,
-                logMessages.getAllValues().get(1));
-
+                logMessages.getAllValues().get(1).replace(NumberFormat.getInstance(Locale.getDefault()).format(1000), NumberFormat.getInstance(Locale.US).format(1000)));
         ArgumentCaptor<String> controllerBulletinMessages = ArgumentCaptor.forClass(String.class);
         verify(eventReporter, times(2)).reportEvent(eq(Severity.WARNING), eq("Long Running Task"), controllerBulletinMessages.capture());
-        assertEquals("Processor with ID Processor-1-ID, Name Processor-1-Name and Type Processor-1-Type has a task that has been running for 60 seconds (thread name: Thread-12).",
-                controllerBulletinMessages.getAllValues().get(0));
-        assertEquals("Processor with ID Processor-2-ID, Name Processor-2-Name and Type Processor-2-Type has a task that has been running for 1,000 seconds (thread name: Thread-21).",
-                controllerBulletinMessages.getAllValues().get(1));
 
-        verify(processorLogger1).warn("The processor has a task that has been running for 60 seconds (thread name: Thread-12).");
+        final String firstBulletinMessage = controllerBulletinMessages.getAllValues().get(0);
+        assertTrue(firstBulletinMessage.contains("Processor-1-ID"));
+        assertTrue(firstBulletinMessage.contains("Processor-1-Type"));
+        assertTrue(firstBulletinMessage.contains("Processor-1-Name"));
+        assertTrue(firstBulletinMessage.contains("Thread-12"));
 
-        verify(processorLogger2).warn("The processor has a task that has been running for 1,000 seconds (thread name: Thread-21).");
-
-        verify(longRunningTaskMonitorLogger).info("Active threads: {}; Long running threads: {}", 4, 2);
-
-        verifyNoMoreInteractions(longRunningTaskMonitorLogger, eventReporter, processorLogger1, processorLogger2);
+        final String secondBulletinMessage = controllerBulletinMessages.getAllValues().get(1);
+        assertTrue(secondBulletinMessage.contains("Processor-2-ID"));
+        assertTrue(secondBulletinMessage.contains("Processor-2-Type"));
+        assertTrue(secondBulletinMessage.contains("Processor-2-Name"));
+        assertTrue(secondBulletinMessage.contains("Thread-21"));
     }
 
     private ActiveThreadInfo mockActiveThreadInfo(String threadName, long activeMillis) {

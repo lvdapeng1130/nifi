@@ -17,6 +17,8 @@
 package org.apache.nifi;
 
 import org.apache.nifi.bundle.Bundle;
+import org.apache.nifi.controller.DecommissionTask;
+import org.apache.nifi.controller.status.history.StatusHistoryDumpFactory;
 import org.apache.nifi.diagnostics.DiagnosticsFactory;
 import org.apache.nifi.nar.ExtensionMapping;
 import org.apache.nifi.util.NiFiProperties;
@@ -37,4 +39,8 @@ public interface NiFiServer {
     DiagnosticsFactory getDiagnosticsFactory();
 
     DiagnosticsFactory getThreadDumpFactory();
+
+    DecommissionTask getDecommissionTask();
+
+    StatusHistoryDumpFactory getStatusHistoryDumpFactory();
 }

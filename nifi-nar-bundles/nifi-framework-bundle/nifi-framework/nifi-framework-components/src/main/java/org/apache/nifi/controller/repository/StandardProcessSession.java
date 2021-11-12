@@ -24,6 +24,7 @@ import org.apache.nifi.connectable.Connection;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.lifecycle.TaskTermination;
 import org.apache.nifi.controller.queue.FlowFileQueue;
+import org.apache.nifi.controller.queue.PollStrategy;
 import org.apache.nifi.controller.queue.QueueSize;
 import org.apache.nifi.controller.repository.claim.ContentClaim;
 import org.apache.nifi.controller.repository.claim.ContentClaimWriteCache;
@@ -60,6 +61,7 @@ import org.apache.nifi.provenance.ProvenanceReporter;
 import org.apache.nifi.stream.io.ByteCountingInputStream;
 import org.apache.nifi.stream.io.ByteCountingOutputStream;
 import org.apache.nifi.stream.io.LimitingInputStream;
+import org.apache.nifi.stream.io.NonFlushableOutputStream;
 import org.apache.nifi.stream.io.StreamUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,6 +80,7 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -93,6 +96,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -190,6 +194,10 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         }
     }
 
+    protected RepositoryContext getRepositoryContext() {
+        return context;
+    }
+
     protected long getSessionId() {
         return sessionId;
     }
@@ -220,19 +228,49 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         resetState();
     }
 
-    private void checkpoint(final boolean copyCollections) {
+    private void validateCommitState() {
         verifyTaskActive();
+
+        if (!readRecursionSet.isEmpty()) {
+            throw new IllegalStateException("Cannot commit session while reading from FlowFile");
+        }
+        if (!writeRecursionSet.isEmpty()) {
+            throw new IllegalStateException("Cannot commit session while writing to FlowFile");
+        }
+
+        for (final StandardRepositoryRecord record : records.values()) {
+            if (record.isMarkedForDelete()) {
+                continue;
+            }
+
+            final Relationship relationship = record.getTransferRelationship();
+            if (relationship == null) {
+                final String createdThisSession = record.getOriginalQueue() == null ? "was created" : "was not created";
+                throw new FlowFileHandlingException(record.getCurrent() + " transfer relationship not specified. This FlowFile " + createdThisSession + " in this session and was not transferred " +
+                    "to any Relationship via ProcessSession.transfer()");
+            }
+
+            final Collection<Connection> destinations = context.getConnections(relationship);
+            if (destinations.isEmpty() && !context.getConnectable().isAutoTerminated(relationship)) {
+                if (relationship != Relationship.SELF) {
+                    throw new FlowFileHandlingException(relationship + " does not have any destinations for " + context.getConnectable());
+                }
+            }
+        }
+    }
+
+    private void checkpoint(final boolean copyCollections) {
+        try {
+            validateCommitState();
+        } catch (final Exception e) {
+            rollback();
+            throw e;
+        }
+
         resetWriteClaims(false);
 
         closeStreams(openInputStreams, "committed", "input");
         closeStreams(openOutputStreams, "committed", "output");
-
-        if (!readRecursionSet.isEmpty()) {
-            throw new IllegalStateException();
-        }
-        if (!writeRecursionSet.isEmpty()) {
-            throw new IllegalStateException();
-        }
 
         if (this.checkpoint == null) {
             this.checkpoint = new Checkpoint();
@@ -255,18 +293,9 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
             if (record.isMarkedForDelete()) {
                 continue;
             }
+
             final Relationship relationship = record.getTransferRelationship();
-            if (relationship == null) {
-                rollback();
-                throw new FlowFileHandlingException(record.getCurrent() + " transfer relationship not specified");
-            }
             final List<Connection> destinations = new ArrayList<>(context.getConnections(relationship));
-            if (destinations.isEmpty() && !context.getConnectable().isAutoTerminated(relationship)) {
-                if (relationship != Relationship.SELF) {
-                    rollback();
-                    throw new FlowFileHandlingException(relationship + " does not have any destinations for " + context.getConnectable());
-                }
-            }
 
             if (destinations.isEmpty() && relationship == Relationship.SELF) {
                 record.setDestination(record.getOriginalQueue());
@@ -329,9 +358,60 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
 
     @Override
     public synchronized void commit() {
-        verifyTaskActive();
+        commit(false);
+    }
+
+    @Override
+    public void commitAsync() {
+        try {
+            commit(true);
+        } catch (final Throwable t) {
+            LOG.error("Failed to asynchronously commit session {} for {}", this, connectableDescription, t);
+
+            try {
+                rollback();
+            } catch (final Throwable t2) {
+                LOG.error("Failed to roll back session {} for {}", this, connectableDescription, t2);
+            }
+
+            throw t;
+        }
+    }
+
+    @Override
+    public void commitAsync(final Runnable onSuccess, final Consumer<Throwable> onFailure) {
+        try {
+            commit(true);
+        } catch (final Throwable t) {
+            LOG.error("Failed to asynchronously commit session {} for {}", this, connectableDescription, t);
+
+            try {
+                rollback();
+            } catch (final Throwable t2) {
+                LOG.error("Failed to roll back session {} for {}", this, connectableDescription, t2);
+            }
+
+            if (onFailure != null) {
+                onFailure.accept(t);
+            }
+
+            throw t;
+        }
+
+        if (onSuccess != null) {
+            try {
+                onSuccess.run();
+            } catch (final Exception e) {
+                LOG.error("Successfully committed session {} for {} but failed to trigger success callback", this, connectableDescription, e);
+            }
+        }
+
+        LOG.debug("Successfully committed session {} for {}", this, connectableDescription);
+    }
+
+    private void commit(final boolean asynchronous) {
         checkpoint(this.checkpoint != null); // If a checkpoint already exists, we need to copy the collection
-        commit(this.checkpoint);
+        commit(this.checkpoint, asynchronous);
 
         acknowledgeRecords();
         resetState();
@@ -339,8 +419,16 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         this.checkpoint = null;
     }
 
+    /**
+     * Commits the given checkpoint, updating repositories as necessary, and performing any necessary cleanup of resources, etc.
+     * Subclasses may choose to perform these tasks asynchronously if the asynchronous flag indicates that it is acceptable to do so.
+     * However, this implementation will perform the commit synchronously, regardless of the {@code asynchronous} flag.
+     *
+     * @param checkpoint the session checkpoint to commit
+     * @param asynchronous whether or not the commit is allowed to be performed asynchronously.
+     */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    protected void commit(final Checkpoint checkpoint) {
+    protected void commit(final Checkpoint checkpoint, final boolean asynchronous) {
         try {
             final long commitStartNanos = System.nanoTime();
 
@@ -1127,7 +1215,6 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         return details.toString();
     }
 
-
     private void decrementClaimCount(final ContentClaim claim) {
         if (claim == null) {
             return;
@@ -1263,8 +1350,16 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
                 final ProvenanceEventBuilder eventBuilder = entry.getValue();
                 for (final String childId : eventBuilder.getChildFlowFileIds()) {
                     if (!flowFileIds.contains(childId)) {
-                        throw new IllegalStateException("Cannot migrate " + eventFlowFile + " to a new session because it was forked to create " + eventBuilder.getChildFlowFileIds().size()
+                        throw new FlowFileHandlingException("Cannot migrate " + eventFlowFile + " to a new session because it was forked to create " + eventBuilder.getChildFlowFileIds().size()
                             + " children and not all children are being migrated. If any FlowFile is forked, all of its children must also be migrated at the same time as the forked FlowFile");
+                    }
+                }
+            } else {
+                final ProvenanceEventBuilder eventBuilder = entry.getValue();
+                for (final String childId : eventBuilder.getChildFlowFileIds()) {
+                    if (flowFileIds.contains(childId)) {
+                        throw new FlowFileHandlingException("Cannot migrate " + eventFlowFile + " to a new session because it was forked from a Parent FlowFile, but the parent is not being migrated. "
+                            + "If any FlowFile is forked, the parent and all children must be migrated at the same time.");
                     }
                 }
             }
@@ -1272,9 +1367,15 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
 
         // If we have a FORK event where a FlowFile is a child of the FORK event, we want to create a FORK
         // event builder for the new owner of the FlowFile and remove the child from our fork event builder.
+        final Set<FlowFile> forkedFlowFilesMigrated = new HashSet<>();
         for (final Map.Entry<FlowFile, ProvenanceEventBuilder> entry : forkEventBuilders.entrySet()) {
             final FlowFile eventFlowFile = entry.getKey();
             final ProvenanceEventBuilder eventBuilder = entry.getValue();
+
+            // If the FlowFile that the event is attached to is not being migrated, we should not migrate the fork event builder either.
+            if (!flowFiles.contains(eventFlowFile)) {
+                continue;
+            }
 
             final Set<String> childrenIds = new HashSet<>(eventBuilder.getChildFlowFileIds());
 
@@ -1294,8 +1395,11 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
 
             if (copy != null) {
                 newOwner.forkEventBuilders.put(eventFlowFile, copy);
+                forkedFlowFilesMigrated.add(eventFlowFile);
             }
         }
+
+        forkedFlowFilesMigrated.forEach(forkEventBuilders::remove);
 
         newOwner.processingStartTime = Math.min(newOwner.processingStartTime, processingStartTime);
 
@@ -1651,8 +1755,15 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
 
 
     private List<FlowFile> get(final ConnectionPoller poller, final boolean lockAllQueues) {
-        final List<Connection> connections = context.getPollableConnections();
-        if (lockAllQueues) {
+        List<Connection> connections = context.getPollableConnections();
+        final boolean sortConnections = lockAllQueues && connections.size() > 1;
+        if (sortConnections) {
+            // Sort by identifier so that if there are two arbitrary connections, we always lock them in the same order.
+            // Otherwise, we could encounter a deadlock, if another thread were to lock the same two connections in a different order.
+            // So we always lock ordered on connection identifier. And unlock in the opposite order.
+            // Before doing this, we must create a copy of the List because the one provided by context.getPollableConnections() is usually an unmodifiableList
+            connections = new ArrayList<>(connections);
+            connections.sort(Comparator.comparing(Connection::getIdentifier));
             for (final Connection connection : connections) {
                 connection.lock();
             }
@@ -1682,7 +1793,10 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
 
             return new ArrayList<>();
         } finally {
-            if (lockAllQueues) {
+            if (sortConnections) {
+                // Reverse ordering in order to unlock
+                connections.sort(Comparator.comparing(Connection::getIdentifier).reversed());
+
                 for (final Connection connection : connections) {
                     connection.unlock();
                 }
@@ -2183,7 +2297,7 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         for (final Connection conn : context.getConnectable().getIncomingConnections()) {
             do {
                 expired.clear();
-                conn.getFlowFileQueue().poll(filter, expired);
+                conn.getFlowFileQueue().poll(filter, expired, PollStrategy.ALL_FLOWFILES);
                 removeExpired(expired, conn);
             } while (!expired.isEmpty());
         }
@@ -2723,6 +2837,9 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
                     }
 
                     closed = true;
+
+                    countingOut.close();
+                    rawStream.close();
                     writeRecursionSet.remove(sourceFlowFile);
 
                     final long bytesWritten = countingOut.getBytesWritten();
@@ -2861,8 +2978,13 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
                     // We need to copy all of the data from the old claim to the new claim
                     StreamUtils.copy(oldClaimIn, outStream);
 
-                    // wrap our OutputStreams so that the processor cannot close it
-                    try (final OutputStream disableOnClose = new DisableOnCloseOutputStream(outStream)) {
+                    // Don't allow flushing of the BufferedOutputStream. The callback may well call wrap our stream in another object that needs to be flushed.
+                    // This is OK, but append() is often used many times to append just a small bit of data, over & over. If we allow flushing of our buffered output stream
+                    // each time, performance suffers. Instead, we prevent the flushing at this level, and we flush in commit.
+                    final NonFlushableOutputStream nonFlushable = new NonFlushableOutputStream(outStream);
+
+                    // Wrap our OutputStreams so that the processor cannot close it
+                    try (final OutputStream disableOnClose = new DisableOnCloseOutputStream(nonFlushable)) {
                         writeRecursionSet.add(source);
                         writer.process(new FlowFileAccessOutputStream(disableOnClose, source));
                     } finally {
@@ -2873,8 +2995,13 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
                 newClaim = oldClaim;
                 originalByteWrittenCount = outStream.getBytesWritten();
 
-                // wrap our OutputStreams so that the processor cannot close it
-                try (final OutputStream disableOnClose = new DisableOnCloseOutputStream(outStream);
+                // Don't allow flushing of the BufferedOutputStream. The callback may well call wrap our stream in another object that needs to be flushed.
+                // This is OK, but append() is often used many times to append just a small bit of data, over & over. If we allow flushing of our buffered output stream
+                // each time, performance suffers. Instead, we prevent the flushing at this level, and we flush in commit.
+                final NonFlushableOutputStream nonFlushable = new NonFlushableOutputStream(outStream);
+
+                // Wrap our OutputStreams so that the processor cannot close it
+                try (final OutputStream disableOnClose = new DisableOnCloseOutputStream(nonFlushable);
                     final OutputStream flowFileAccessOutStream = new FlowFileAccessOutputStream(disableOnClose, source)) {
                     writeRecursionSet.add(source);
                     writer.process(flowFileAccessOutStream);
@@ -2959,7 +3086,7 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         // If the content of the FlowFile has already been modified, we need to remove the newly created content (the working claim). However, if
         // they are the same, we cannot just remove the claim because record.getWorkingClaim() will return
         // the original claim if the record is "working" but the content has not been modified
-        // (e.g., in the case of attributes only were updated)
+        // (e.g., in the case of attributes only were updated).
         //
         // In other words:
         // If we modify the attributes of a FlowFile, and then we call record.getWorkingClaim(), this will
@@ -2967,7 +3094,14 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
         // that may decrement the original claim (because the 2 claims are the same), and that's NOT what we want to do
         // because we will do that later, in the session.commit() and that would result in decrementing the count for
         // the original claim twice.
-        if (record.isContentModified()) {
+        //
+        // Additionally, If the Record Type is CREATE, that means any content that exists is a temporary claim.
+        // This will happen, for example, if a FlowFile is created and then written to multiple times or a FlowFile is cloned and then the clone's contents
+        // are overwritten. In such a case, we can confidently decrement the count/remove the claim because either the claim is null (in which case calling
+        // decrementClaimantCount/addTransientClaim will have no effect, or the claim points to the previously written content that is no longer relevant because
+        // the FlowFile's content is being overwritten.
+
+        if (record.isContentModified() || record.getType() == RepositoryRecordType.CREATE) {
             // In this case, it's ok to decrement the claimant count for the content because we know that the working claim is going to be
             // updated and the given working claim is referenced only by FlowFiles in this session (because it's the Working Claim).
             // Therefore, we need to decrement the claimant count, and since the Working Claim is being changed, that means that
@@ -3661,6 +3795,30 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
 
         private StandardRepositoryRecord getRecord(final FlowFile flowFile) {
             return records.get(flowFile.getId());
+        }
+
+        public int getFlowFilesIn() {
+            return flowFilesIn;
+        }
+
+        public int getFlowFilesOut() {
+            return flowFilesOut;
+        }
+
+        public int getFlowFilesRemoved() {
+            return removedCount;
+        }
+
+        public long getBytesIn() {
+            return contentSizeIn;
+        }
+
+        public long getBytesOut() {
+            return contentSizeOut;
+        }
+
+        public long getBytesRemoved() {
+            return removedBytes;
         }
     }
 }

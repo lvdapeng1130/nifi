@@ -17,6 +17,7 @@
 
 package org.apache.nifi.controller.service;
 
+import org.apache.nifi.components.validation.ValidationStatus;
 import org.apache.nifi.controller.ComponentNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BooleanSupplier;
 
 public class ServiceStateTransition {
     private static final Logger logger = LoggerFactory.getLogger(ServiceStateTransition.class);
@@ -77,18 +79,28 @@ public class ServiceStateTransition {
             logger.debug("{} transitioned to ENABLED", controllerServiceNode);
 
             enabledFutures.forEach(future -> future.complete(null));
-
-            final List<ComponentNode> referencingComponents = controllerServiceReference.findRecursiveReferences(ComponentNode.class);
-            for (final ComponentNode component : referencingComponents) {
-                component.performValidation();
-            }
-
-            stateChangeCondition.signalAll();
-
-            return true;
         } finally {
             writeLock.unlock();
         }
+
+        // We want to perform validation against other components outside of the write lock. Component validation could be expensive
+        // and more importantly could reference other controller services, which could result in a dead lock if we run the validation
+        // while holding this.writeLock.
+        final List<ComponentNode> referencingComponents = controllerServiceReference.findRecursiveReferences(ComponentNode.class);
+        for (final ComponentNode component : referencingComponents) {
+            component.performValidation();
+        }
+
+        // Now that the write lock was relinquished in order to perform validation on referencing components, we must re-acquire it
+        // in order to signal that a state change has completed.
+        writeLock.lock();
+        try {
+            stateChangeCondition.signalAll();
+        } finally {
+            writeLock.unlock();
+        }
+
+        return true;
     }
 
     public boolean transitionToDisabling(final ControllerServiceState expectedState, final CompletableFuture<?> disabledFuture) {
@@ -130,24 +142,50 @@ public class ServiceStateTransition {
         }
     }
 
-    public boolean awaitState(final ControllerServiceState desiredState, final long timePeriod, final TimeUnit timeUnit) throws InterruptedException {
+    /**
+     * Waits up to the specified max amount of time for the given predicate to become true.
+     * @param predicate the condition under which the wait should stop
+     * @param timePeriod the max period of time to wait
+     * @param timeUnit the time unit associated with the time period
+     * @return true if the predicate becomes true before the given time period, false if the time period elapses first
+     * @throws InterruptedException if interrupted while waiting for the condition to become true
+     */
+    public boolean awaitCondition(final BooleanSupplier predicate, final long timePeriod, final TimeUnit timeUnit, final String desiredConditionDescription) throws InterruptedException {
         Objects.requireNonNull(timeUnit);
         final long timeout = System.currentTimeMillis() + timeUnit.toMillis(timePeriod);
 
         writeLock.lock();
         try {
-            while (desiredState != state) {
+            while (!predicate.getAsBoolean()) {
                 final long millisLeft = timeout - System.currentTimeMillis();
                 if (millisLeft <= 0) {
                     return false;
                 }
 
-                logger.debug("State of {} is currently {}. Will wait up to {} milliseconds for state to transition to {}", controllerServiceNode, state, millisLeft, desiredState);
+                logger.debug("State of {} is currently {}. Will wait up to {} milliseconds for condition to become {}", controllerServiceNode, state, millisLeft, desiredConditionDescription);
 
                 stateChangeCondition.await(millisLeft, TimeUnit.MILLISECONDS);
             }
 
             return true;
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    public boolean awaitState(final ControllerServiceState desiredState, final long timePeriod, final TimeUnit timeUnit) throws InterruptedException {
+        return awaitCondition(() -> desiredState == state, timePeriod, timeUnit, "service has a state of " + desiredState.name());
+    }
+
+    public boolean awaitStateOrInvalid(final ControllerServiceState desiredState, final long timePeriod, final TimeUnit timeUnit) throws InterruptedException {
+        final BooleanSupplier predicate = () -> desiredState == state || controllerServiceNode.getValidationStatus() == ValidationStatus.INVALID;
+        return awaitCondition(predicate, timePeriod, timeUnit, "service has a state of " + desiredState.name());
+    }
+
+    public void signalInvalid() {
+        writeLock.lock();
+        try {
+            stateChangeCondition.signalAll();
         } finally {
             writeLock.unlock();
         }

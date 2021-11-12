@@ -40,6 +40,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -117,7 +118,9 @@ import static org.apache.commons.lang3.StringUtils.trimToEmpty;
         @WritesAttribute(attribute = InvokeHTTP.STATUS_MESSAGE, description = "The status message that is returned"),
         @WritesAttribute(attribute = InvokeHTTP.RESPONSE_BODY, description = "In the instance where the status code received is not a success (2xx) "
                 + "then the response body will be put to the 'invokehttp.response.body' attribute of the request FlowFile."),
-        @WritesAttribute(attribute = InvokeHTTP.REQUEST_URL, description = "The request URL"),
+        @WritesAttribute(attribute = InvokeHTTP.REQUEST_URL, description = "The original request URL"),
+        @WritesAttribute(attribute = InvokeHTTP.REQUEST_DURATION, description = "Duration (in milliseconds) of the HTTP call to the external endpoint"),
+        @WritesAttribute(attribute = InvokeHTTP.RESPONSE_URL, description = "The URL that was ultimately requested after any redirects were followed"),
         @WritesAttribute(attribute = InvokeHTTP.TRANSACTION_ID, description = "The transaction ID that is returned after reading the response"),
         @WritesAttribute(attribute = InvokeHTTP.REMOTE_DN, description = "The DN of the remote server"),
         @WritesAttribute(attribute = InvokeHTTP.EXCEPTION_CLASS, description = "The Java exception class raised when the processor fails"),
@@ -140,6 +143,8 @@ public class InvokeHTTP extends AbstractProcessor {
     public final static String STATUS_MESSAGE = "invokehttp.status.message";
     public final static String RESPONSE_BODY = "invokehttp.response.body";
     public final static String REQUEST_URL = "invokehttp.request.url";
+    public final static String REQUEST_DURATION = "invokehttp.request.duration";
+    public final static String RESPONSE_URL = "invokehttp.response.url";
     public final static String TRANSACTION_ID = "invokehttp.tx.id";
     public final static String REMOTE_DN = "invokehttp.remote.dn";
     public final static String EXCEPTION_CLASS = "invokehttp.java.exception.class";
@@ -154,7 +159,7 @@ public class InvokeHTTP extends AbstractProcessor {
     // This set includes our strings defined above as well as some standard flowfile
     // attributes.
     public static final Set<String> IGNORED_ATTRIBUTES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
-            STATUS_CODE, STATUS_MESSAGE, RESPONSE_BODY, REQUEST_URL, TRANSACTION_ID, REMOTE_DN,
+            STATUS_CODE, STATUS_MESSAGE, RESPONSE_BODY, REQUEST_URL, RESPONSE_URL, TRANSACTION_ID, REMOTE_DN,
             EXCEPTION_CLASS, EXCEPTION_MESSAGE,
             "uuid", "filename", "path")));
 
@@ -554,7 +559,8 @@ public class InvokeHTTP extends AbstractProcessor {
             REL_SUCCESS_REQ, REL_RESPONSE, REL_RETRY, REL_NO_RETRY, REL_FAILURE)));
 
     // RFC 2616 Date Time Formatter with hard-coded GMT Zone
-    private static final DateTimeFormatter RFC_2616_DATE_TIME = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'");
+    // https://tools.ietf.org/html/rfc2616#section-3.3 - date format header should not be localized
+    private static final DateTimeFormatter RFC_2616_DATE_TIME = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
 
     // Multiple Header Delimiter
     private static final String MULTIPLE_HEADER_DELIMITER = ", ";
@@ -856,6 +862,8 @@ public class InvokeHTTP extends AbstractProcessor {
                 statusAttributes.put(STATUS_CODE, String.valueOf(statusCode));
                 statusAttributes.put(STATUS_MESSAGE, statusMessage);
                 statusAttributes.put(REQUEST_URL, url.toExternalForm());
+                statusAttributes.put(REQUEST_DURATION, Long.toString(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos)));
+                statusAttributes.put(RESPONSE_URL, responseHttp.request().url().toString());
                 statusAttributes.put(TRANSACTION_ID, txId.toString());
 
                 if (requestFlowFile != null) {

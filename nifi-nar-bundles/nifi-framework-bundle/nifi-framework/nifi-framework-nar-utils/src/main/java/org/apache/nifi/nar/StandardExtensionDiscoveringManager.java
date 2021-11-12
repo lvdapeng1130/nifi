@@ -53,6 +53,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -86,6 +87,10 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
     private final Map<String, InstanceClassLoader> instanceClassloaderLookup = new ConcurrentHashMap<>();
 
     public StandardExtensionDiscoveringManager() {
+        this(Collections.emptyList());
+    }
+
+    public StandardExtensionDiscoveringManager(final Collection<Class<? extends ConfigurableComponent>> additionalExtensionTypes) {
         definitionMap.put(Processor.class, new HashSet<>());
         definitionMap.put(FlowFilePrioritizer.class, new HashSet<>());
         definitionMap.put(ReportingTask.class, new HashSet<>());
@@ -101,6 +106,9 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
         definitionMap.put(ContentRepository.class, new HashSet<>());
         definitionMap.put(StateProvider.class, new HashSet<>());
         definitionMap.put(StatusAnalyticsModel.class, new HashSet<>());
+        definitionMap.put(NarProvider.class, new HashSet<>());
+
+        additionalExtensionTypes.forEach(type -> definitionMap.putIfAbsent(type, new HashSet<>()));
     }
 
     @Override
@@ -121,7 +129,7 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
     }
 
     @Override
-    public void discoverExtensions(final Set<Bundle> narBundles) {
+    public void discoverExtensions(final Set<Bundle> narBundles, final boolean logDetails) {
         // get the current context class loader
         ClassLoader currentContextClassLoader = Thread.currentThread().getContextClassLoader();
 
@@ -135,7 +143,9 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
             final long loadStart = System.currentTimeMillis();
             loadExtensions(bundle);
             final long loadMillis = System.currentTimeMillis() - loadStart;
-            logger.info("Loaded extensions for {} in {} millis", bundle.getBundleDetails(), loadMillis);
+            if (logDetails) {
+                logger.info("Loaded extensions for {} in {} millis", bundle.getBundleDetails(), loadMillis);
+            }
 
             // Create a look-up from coordinate to bundle
             bundleCoordinateBundleLookup.put(bundle.getBundleDetails().getCoordinate(), bundle);
@@ -249,10 +259,11 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
 
 
     protected void initializeTempComponent(final ConfigurableComponent configurableComponent) {
-        ConfigurableComponentInitializer initializer = null;
         try {
-            initializer = ConfigurableComponentInitializerFactory.createComponentInitializer(this, configurableComponent.getClass());
-            initializer.initialize(configurableComponent);
+            final ConfigurableComponentInitializer initializer = ConfigurableComponentInitializerFactory.createComponentInitializer(this, configurableComponent.getClass());
+            if (initializer != null) {
+                initializer.initialize(configurableComponent);
+            }
         } catch (final InitializationException e) {
             logger.warn(String.format("Unable to initialize component %s due to %s", configurableComponent.getClass().getName(), e.getMessage()));
         }
@@ -347,7 +358,7 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
     }
 
     @Override
-    public InstanceClassLoader createInstanceClassLoader(final String classType, final String instanceIdentifier, final Bundle bundle, final Set<URL> additionalUrls) {
+    public InstanceClassLoader createInstanceClassLoader(final String classType, final String instanceIdentifier, final Bundle bundle, final Set<URL> additionalUrls, final boolean register) {
         if (StringUtils.isEmpty(classType)) {
             throw new IllegalArgumentException("Class-Type is required");
         }
@@ -418,7 +429,10 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
             }
         }
 
-        instanceClassloaderLookup.put(instanceIdentifier, instanceClassLoader);
+        if (register) {
+            instanceClassloaderLookup.put(instanceIdentifier, instanceClassLoader);
+        }
+
         return instanceClassLoader;
     }
 
@@ -460,6 +474,11 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
         final InstanceClassLoader classLoader = instanceClassloaderLookup.remove(instanceIdentifier);
         closeURLClassLoader(instanceIdentifier, classLoader);
         return classLoader;
+    }
+
+    @Override
+    public void registerInstanceClassLoader(final String instanceIdentifier, final InstanceClassLoader instanceClassLoader) {
+        instanceClassloaderLookup.putIfAbsent(instanceIdentifier, instanceClassLoader);
     }
 
     @Override
@@ -549,6 +568,12 @@ public class StandardExtensionDiscoveringManager implements ExtensionDiscovering
             return tempComponent;
         } catch (final Exception e) {
             logger.error("Could not instantiate class of type {} using ClassLoader for bundle {}", classType, bundleCoordinate, e);
+            if (logger.isDebugEnabled() && bundleClassLoader instanceof URLClassLoader) {
+                final URLClassLoader urlClassLoader = (URLClassLoader) bundleClassLoader;
+                final List<URL> availableUrls = Arrays.asList(urlClassLoader.getURLs());
+                logger.debug("Available URLs for Bundle ClassLoader {}: {}", bundleCoordinate, availableUrls);
+            }
+
             return null;
         }
     }

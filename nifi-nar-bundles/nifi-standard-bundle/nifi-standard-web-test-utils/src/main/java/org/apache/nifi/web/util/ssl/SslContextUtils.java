@@ -17,63 +17,51 @@
 package org.apache.nifi.web.util.ssl;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.nifi.security.util.KeystoreType;
 import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.security.util.StandardTlsConfiguration;
+import org.apache.nifi.security.util.TemporaryKeyStoreBuilder;
 import org.apache.nifi.security.util.TlsConfiguration;
 import org.apache.nifi.security.util.TlsException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
 import java.io.File;
-import java.security.Security;
 
 public class SslContextUtils {
-    private static final Logger LOGGER = LoggerFactory.getLogger(SslContextUtils.class);
+    private static final TlsConfiguration TLS_CONFIGURATION;
 
-    private static final String TLS_DISABLED_ALGORITHMS_PROPERTY = "jdk.tls.disabledAlgorithms";
+    private static final TlsConfiguration KEYSTORE_TLS_CONFIGURATION;
 
-    private static final String DISABLED_ALGORITHMS = "SSLv3, RC4, DES, MD5withRSA, DH keySize < 1024, EC keySize < 224, 3DES_EDE_CBC, anon, NULL, include jdk.disabled.namedCurves";
+    private static final TlsConfiguration TRUSTSTORE_TLS_CONFIGURATION;
 
     static {
-        final String disabledAlgorithms = Security.getProperty(TLS_DISABLED_ALGORITHMS_PROPERTY);
-        if (DISABLED_ALGORITHMS.equals(disabledAlgorithms)) {
-            LOGGER.debug("Found Expected Default TLS Disabled Algorithms: {}", DISABLED_ALGORITHMS);
-        } else {
-            LOGGER.warn("Found System Default TLS Disabled Algorithms: {}", disabledAlgorithms);
-            LOGGER.warn("Setting TLS Disabled Algorithms: {}", DISABLED_ALGORITHMS);
-            Security.setProperty(TLS_DISABLED_ALGORITHMS_PROPERTY, DISABLED_ALGORITHMS);
+        try {
+            TLS_CONFIGURATION = new TemporaryKeyStoreBuilder().build();
+
+            KEYSTORE_TLS_CONFIGURATION = new StandardTlsConfiguration(
+                    TLS_CONFIGURATION.getKeystorePath(),
+                    TLS_CONFIGURATION.getKeystorePassword(),
+                    TLS_CONFIGURATION.getKeyPassword(),
+                    TLS_CONFIGURATION.getKeystoreType().getType(),
+                    TLS_CONFIGURATION.getTruststorePath(),
+                    TLS_CONFIGURATION.getTruststorePassword(),
+                    TLS_CONFIGURATION.getTruststoreType().getType(),
+                    TlsConfiguration.TLS_1_2_PROTOCOL
+            );
+
+            TRUSTSTORE_TLS_CONFIGURATION = new StandardTlsConfiguration(
+                    null,
+                    null,
+                    null,
+                    null,
+                    TLS_CONFIGURATION.getTruststorePath(),
+                    TLS_CONFIGURATION.getTruststorePassword(),
+                    TLS_CONFIGURATION.getTruststoreType().getType(),
+                    TlsConfiguration.TLS_1_2_PROTOCOL
+            );
+        } catch (final Exception e) {
+            throw new IllegalStateException("Failed to create TLS configuration for testing", e);
         }
     }
-
-    private static final String KEYSTORE_PATH = "src/test/resources/keystore.jks";
-
-    private static final String KEYSTORE_AND_TRUSTSTORE_PASSWORD = "passwordpassword";
-
-    private static final String TRUSTSTORE_PATH = "src/test/resources/truststore.jks";
-
-    private static final TlsConfiguration KEYSTORE_TLS_CONFIGURATION = new StandardTlsConfiguration(
-            KEYSTORE_PATH,
-            KEYSTORE_AND_TRUSTSTORE_PASSWORD,
-            KEYSTORE_AND_TRUSTSTORE_PASSWORD,
-            KeystoreType.JKS,
-            TRUSTSTORE_PATH,
-            KEYSTORE_AND_TRUSTSTORE_PASSWORD,
-            KeystoreType.JKS,
-            TlsConfiguration.TLS_1_2_PROTOCOL
-    );
-
-    private static final TlsConfiguration TRUSTSTORE_TLS_CONFIGURATION = new StandardTlsConfiguration(
-            null,
-            null,
-            null,
-            null,
-            TRUSTSTORE_PATH,
-            KEYSTORE_AND_TRUSTSTORE_PASSWORD,
-            KeystoreType.JKS,
-            TlsConfiguration.TLS_1_2_PROTOCOL
-    );
 
     /**
      * Create SSLContext with Key Store and Trust Store configured

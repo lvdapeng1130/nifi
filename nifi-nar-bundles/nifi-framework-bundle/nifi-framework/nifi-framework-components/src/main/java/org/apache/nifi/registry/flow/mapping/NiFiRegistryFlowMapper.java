@@ -20,6 +20,8 @@ package org.apache.nifi.registry.flow.mapping;
 import org.apache.commons.lang3.ClassUtils;
 import org.apache.nifi.bundle.BundleCoordinate;
 import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.components.resource.ResourceCardinality;
+import org.apache.nifi.components.resource.ResourceDefinition;
 import org.apache.nifi.connectable.Connectable;
 import org.apache.nifi.connectable.Connection;
 import org.apache.nifi.connectable.Funnel;
@@ -41,31 +43,34 @@ import org.apache.nifi.parameter.ParameterContext;
 import org.apache.nifi.parameter.ParameterDescriptor;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.registry.VariableDescriptor;
-import org.apache.nifi.registry.flow.BatchSize;
-import org.apache.nifi.registry.flow.Bundle;
-import org.apache.nifi.registry.flow.ComponentType;
-import org.apache.nifi.registry.flow.ConnectableComponent;
-import org.apache.nifi.registry.flow.ConnectableComponentType;
-import org.apache.nifi.registry.flow.ControllerServiceAPI;
+import org.apache.nifi.flow.BatchSize;
+import org.apache.nifi.flow.Bundle;
+import org.apache.nifi.flow.ComponentType;
+import org.apache.nifi.flow.ConnectableComponent;
+import org.apache.nifi.flow.ConnectableComponentType;
+import org.apache.nifi.flow.ControllerServiceAPI;
 import org.apache.nifi.registry.flow.ExternalControllerServiceReference;
 import org.apache.nifi.registry.flow.FlowRegistry;
 import org.apache.nifi.registry.flow.FlowRegistryClient;
-import org.apache.nifi.registry.flow.PortType;
-import org.apache.nifi.registry.flow.Position;
+import org.apache.nifi.flow.PortType;
+import org.apache.nifi.flow.Position;
 import org.apache.nifi.registry.flow.VersionControlInformation;
-import org.apache.nifi.registry.flow.VersionedConnection;
-import org.apache.nifi.registry.flow.VersionedControllerService;
-import org.apache.nifi.registry.flow.VersionedFlowCoordinates;
-import org.apache.nifi.registry.flow.VersionedFunnel;
-import org.apache.nifi.registry.flow.VersionedLabel;
+import org.apache.nifi.flow.VersionedConnection;
+import org.apache.nifi.flow.VersionedControllerService;
+import org.apache.nifi.flow.VersionedFlowCoordinates;
+import org.apache.nifi.flow.VersionedFunnel;
+import org.apache.nifi.flow.VersionedLabel;
 import org.apache.nifi.registry.flow.VersionedParameter;
 import org.apache.nifi.registry.flow.VersionedParameterContext;
-import org.apache.nifi.registry.flow.VersionedPort;
-import org.apache.nifi.registry.flow.VersionedProcessGroup;
-import org.apache.nifi.registry.flow.VersionedProcessor;
-import org.apache.nifi.registry.flow.VersionedPropertyDescriptor;
-import org.apache.nifi.registry.flow.VersionedRemoteGroupPort;
-import org.apache.nifi.registry.flow.VersionedRemoteProcessGroup;
+import org.apache.nifi.flow.VersionedPort;
+import org.apache.nifi.flow.VersionedProcessGroup;
+import org.apache.nifi.flow.VersionedProcessor;
+import org.apache.nifi.flow.VersionedPropertyDescriptor;
+import org.apache.nifi.flow.VersionedRemoteGroupPort;
+import org.apache.nifi.flow.VersionedRemoteProcessGroup;
+import org.apache.nifi.flow.VersionedResourceCardinality;
+import org.apache.nifi.flow.VersionedResourceDefinition;
+import org.apache.nifi.flow.VersionedResourceType;
 import org.apache.nifi.remote.PublicPort;
 import org.apache.nifi.remote.RemoteGroupPort;
 
@@ -192,6 +197,9 @@ public class NiFiRegistryFlowMapper {
         versionedGroup.setPosition(mapPosition(group.getPosition()));
         versionedGroup.setFlowFileConcurrency(group.getFlowFileConcurrency().name());
         versionedGroup.setFlowFileOutboundPolicy(group.getFlowFileOutboundPolicy().name());
+        versionedGroup.setDefaultFlowFileExpiration(group.getDefaultFlowFileExpiration());
+        versionedGroup.setDefaultBackPressureObjectThreshold(group.getDefaultBackPressureObjectThreshold());
+        versionedGroup.setDefaultBackPressureDataSizeThreshold(group.getDefaultBackPressureDataSizeThreshold());
 
         final ParameterContext parameterContext = group.getParameterContext();
         versionedGroup.setParameterContextName(parameterContext == null ? null : parameterContext.getName());
@@ -458,6 +466,9 @@ public class NiFiRegistryFlowMapper {
             versionedDescriptor.setDisplayName(descriptor.getDisplayName());
             versionedDescriptor.setSensitive(descriptor.isSensitive());
 
+            final VersionedResourceDefinition versionedResourceDefinition = mapResourceDefinition(descriptor.getResourceDefinition());
+            versionedDescriptor.setResourceDefinition(versionedResourceDefinition);
+
             final Class<?> referencedServiceType = descriptor.getControllerServiceDefinition();
             versionedDescriptor.setIdentifiesControllerService(referencedServiceType != null);
 
@@ -485,6 +496,23 @@ public class NiFiRegistryFlowMapper {
         }
 
         return descriptors;
+    }
+
+    private VersionedResourceDefinition mapResourceDefinition(final ResourceDefinition resourceDefinition) {
+        if (resourceDefinition == null) {
+            return null;
+        }
+
+        final ResourceCardinality cardinality = resourceDefinition.getCardinality();
+        final VersionedResourceCardinality versionedCardinality = VersionedResourceCardinality.valueOf(cardinality.name());
+
+        final Set<VersionedResourceType> versionedResourceTypes = new HashSet<>();
+        resourceDefinition.getResourceTypes().forEach(resourceType -> versionedResourceTypes.add(VersionedResourceType.valueOf(resourceType.name())));
+
+        final VersionedResourceDefinition versionedResourceDefinition = new VersionedResourceDefinition();
+        versionedResourceDefinition.setCardinality(versionedCardinality);
+        versionedResourceDefinition.setResourceTypes(versionedResourceTypes);
+        return versionedResourceDefinition;
     }
 
     private Bundle mapBundle(final BundleCoordinate coordinate) {
@@ -593,8 +621,8 @@ public class NiFiRegistryFlowMapper {
         processor.setSchedulingStrategy(procNode.getSchedulingStrategy().name());
         processor.setStyle(procNode.getStyle());
         processor.setYieldDuration(procNode.getYieldPeriod());
-        processor.setScheduledState(procNode.getScheduledState() == ScheduledState.DISABLED ? org.apache.nifi.registry.flow.ScheduledState.DISABLED
-            : org.apache.nifi.registry.flow.ScheduledState.ENABLED);
+        processor.setScheduledState(procNode.getScheduledState() == ScheduledState.DISABLED ? org.apache.nifi.flow.ScheduledState.DISABLED
+            : org.apache.nifi.flow.ScheduledState.ENABLED);
 
         return processor;
     }
@@ -660,15 +688,7 @@ public class NiFiRegistryFlowMapper {
                                       final Map<String, VersionedParameterContext> parameterContexts) {
         final ParameterContext parameterContext = processGroup.getParameterContext();
         if (parameterContext != null) {
-            // map this process group's parameter context and add to the collection
-            final Set<VersionedParameter> parameters = parameterContext.getParameters().values().stream()
-                    .map(this::mapParameter)
-                    .collect(Collectors.toSet());
-
-            final VersionedParameterContext versionedContext = new VersionedParameterContext();
-            versionedContext.setName(parameterContext.getName());
-            versionedContext.setParameters(parameters);
-            parameterContexts.put(versionedContext.getName(), versionedContext);
+            mapParameterContext(parameterContext, parameterContexts);
         }
 
         for (final ProcessGroup child : processGroup.getProcessGroups()) {
@@ -677,6 +697,23 @@ public class NiFiRegistryFlowMapper {
                 mapParameterContexts(child, mapDescendantVersionedFlows, parameterContexts);
             }
         }
+    }
+
+    private void mapParameterContext(final ParameterContext parameterContext, final Map<String, VersionedParameterContext> parameterContexts) {
+        // map this process group's parameter context and add to the collection
+        final Set<VersionedParameter> parameters = parameterContext.getParameters().values().stream()
+                .map(this::mapParameter)
+                .collect(Collectors.toSet());
+
+        final VersionedParameterContext versionedContext = new VersionedParameterContext();
+        versionedContext.setName(parameterContext.getName());
+        versionedContext.setParameters(parameters);
+        versionedContext.setInheritedParameterContexts(parameterContext.getInheritedParameterContextNames());
+        for(final ParameterContext inheritedParameterContext : parameterContext.getInheritedParameterContexts()) {
+            mapParameterContext(inheritedParameterContext, parameterContexts);
+        }
+
+        parameterContexts.put(versionedContext.getName(), versionedContext);
     }
 
     private VersionedParameter mapParameter(final Parameter parameter) {

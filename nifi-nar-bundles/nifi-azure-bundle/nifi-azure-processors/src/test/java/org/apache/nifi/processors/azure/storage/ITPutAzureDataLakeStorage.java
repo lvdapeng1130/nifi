@@ -26,7 +26,6 @@ import org.apache.nifi.provenance.ProvenanceEventRecord;
 import org.apache.nifi.provenance.ProvenanceEventType;
 import org.apache.nifi.util.MockFlowFile;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.InputStream;
@@ -140,8 +139,6 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
         assertSuccess(DIRECTORY, FILE_NAME, fileData);
     }
 
-    @Ignore
-    // ignore excessive test with larger file size
     @Test
     public void testPutBigFile() throws Exception {
         Random random = new Random();
@@ -304,8 +301,9 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
 
         String urlEscapedDirectory = UrlEscapers.urlPathSegmentEscaper().escape(directory);
         String urlEscapedFileName = UrlEscapers.urlPathSegmentEscaper().escape(fileName);
+        String urlEscapedPathSeparator = UrlEscapers.urlPathSegmentEscaper().escape("/");
         String primaryUri = StringUtils.isNotEmpty(directory)
-                ? String.format("https://%s.dfs.core.windows.net/%s/%s/%s", getAccountName(), fileSystemName, urlEscapedDirectory, urlEscapedFileName)
+                ? String.format("https://%s.dfs.core.windows.net/%s/%s%s%s", getAccountName(), fileSystemName, urlEscapedDirectory, urlEscapedPathSeparator, urlEscapedFileName)
                 : String.format("https://%s.dfs.core.windows.net/%s/%s", getAccountName(), fileSystemName, urlEscapedFileName);
         flowFile.assertAttributeEquals(ATTR_NAME_PRIMARY_URI, primaryUri);
 

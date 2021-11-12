@@ -18,7 +18,7 @@
     </parent>
     <groupId>org.apache.nifi</groupId>
     <artifactId>nifi</artifactId>
-    <version>1.14.0-SNAPSHOT</version>
+    <version>1.16.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <description>Apache NiFi is an easy to use, powerful, and reliable system to process and distribute data.</description>
     <modules>
@@ -33,11 +33,14 @@
         <module>nifi-docs</module>
         <module>nifi-maven-archetypes</module>
         <module>nifi-external</module>
-        <module>nifi-toolkit</module>
         <module>nifi-docker</module>
         <module>nifi-system-tests</module>
         <module>nifi-run</module>
-  </modules>
+        <module>minifi</module>
+        <module>nifi-stateless</module>
+        <module>nifi-registry</module>
+        <module>nifi-toolkit</module>
+    </modules>
     <url>https://nifi.apache.org</url>
     <organization>
         <name>Apache NiFi Project</name>
@@ -76,7 +79,7 @@
         <connection>scm:git:git://git.apache.org/nifi.git</connection>
         <developerConnection>scm:git:https://git-wip-us.apache.org/repos/asf/nifi.git</developerConnection>
         <url>https://git-wip-us.apache.org/repos/asf?p=nifi.git</url>
-        <tag>HEAD</tag>
+        <tag>nifi-1.15.0-RC3</tag>
     </scm>
     <issueManagement>
         <system>JIRA</system>
@@ -85,19 +88,22 @@
     <properties>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.showDeprecation>true</maven.compiler.showDeprecation>
         <maven.surefire.arguments />
+        <node.version>v12.22.2</node.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <inceptionYear>2014</inceptionYear>
-        <okhttp.version>4.9.1</okhttp.version>
-        <org.bouncycastle.version>1.68</org.bouncycastle.version>
-        <org.slf4j.version>1.7.30</org.slf4j.version>
+        <okhttp.version>4.9.2</okhttp.version>
+        <org.bouncycastle.version>1.69</org.bouncycastle.version>
+        <org.slf4j.version>1.7.32</org.slf4j.version>
         <ranger.version>2.1.0</ranger.version>
-        <jetty.version>9.4.38.v20210224</jetty.version>
-        <jackson.version>2.12.2</jackson.version>
-        <nifi.registry.version>0.8.0</nifi.registry.version>
-        <nifi.groovy.version>2.5.4</nifi.groovy.version>
-        <surefire.version>2.22.2</surefire.version>
+        <jetty.version>9.4.44.v20210927</jetty.version>
+        <jackson.version>2.12.3</jackson.version>
+        <jaxb.runtime.version>2.3.5</jaxb.runtime.version>
+        <jakarta.xml.bind-api.version>2.3.3</jakarta.xml.bind-api.version>
+        <nifi.groovy.version>2.5.14</nifi.groovy.version>
+        <surefire.version>3.0.0-M5</surefire.version>
         <!-- The Hadoop version used by nifi-hadoop-libraries-nar and any NARs that depend on it, other NARs that need
             a specific version should override this property, or use a more specific property like abc.hadoop.version -->
         <hadoop.version>3.3.0</hadoop.version>
@@ -105,6 +111,10 @@
         <gcs.version>2.1.5</gcs.version>
         <aspectj.version>1.9.6</aspectj.version>
         <jersey.version>2.33</jersey.version>
+        <logback.version>1.2.6</logback.version>
+        <mockito.version>3.11.2</mockito.version>
+        <netty.3.version>3.10.6.Final</netty.3.version>
+        <netty.4.version>4.1.69.Final</netty.4.version>
     </properties>
 
     <repositories>
@@ -146,6 +156,12 @@
             <id>Shibboleth</id>
             <name>Shibboleth</name>
             <url>https://build.shibboleth.net/nexus/content/repositories/releases/</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
         </repository>
     </repositories>
 
@@ -177,17 +193,6 @@
                 <updatePolicy>never</updatePolicy>
             </releases>
         </pluginRepository>
-        <pluginRepository>
-            <id>bintray</id>
-            <name>Groovy Bintray</name>
-            <url>https://dl.bintray.com/groovy/maven</url>
-            <releases>
-                <updatePolicy>never</updatePolicy>
-            </releases>
-            <snapshots>
-                <enabled>false</enabled>
-            </snapshots>
-        </pluginRepository>
     </pluginRepositories>
 
     <dependencyManagement>
@@ -215,7 +220,7 @@
             <dependency>
                 <groupId>ch.qos.logback</groupId>
                 <artifactId>logback-classic</artifactId>
-                <version>1.2.3</version>
+                <version>${logback.version}</version>
                 <scope>provided</scope>
             </dependency>
             <dependency>
@@ -270,14 +275,27 @@
 
             <!-- These junit/mockito/groovy/spock/hamcrest dependencies are here to encourage consistent unit test library usage -->
             <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>5.7.2</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
                 <groupId>junit</groupId>
                 <artifactId>junit</artifactId>
-                <version>4.13.1</version>
+                <version>4.13.2</version>
+                <scope>test</scope>
             </dependency>
             <dependency>
                 <groupId>org.mockito</groupId>
                 <artifactId>mockito-core</artifactId>
-                <version>2.28.2</version>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${mockito.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.codehaus.groovy</groupId>
@@ -357,6 +375,96 @@
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-alpn-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-alpn-java-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-continuation</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-http</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-io</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-jaas</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-rewrite</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-runner</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-util</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-util-ajax</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.http2</groupId>
+                <artifactId>http2-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.http2</groupId>
+                <artifactId>http2-common</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.http2</groupId>
+                <artifactId>http2-hpack</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.http2</groupId>
+                <artifactId>http2-http-client-transport</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-api</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-client</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty.websocket</groupId>
+                <artifactId>websocket-server</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
                 <artifactId>apache-jsp</artifactId>
                 <version>${jetty.version}</version>
                 <scope>provided</scope>
@@ -382,13 +490,28 @@
 
     <dependencies>
         <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -412,15 +535,14 @@
                     <version>3.8.1</version>
                     <configuration>
                         <fork>true</fork>
-                        <optimize>true</optimize>
-                        <showDeprecation>true</showDeprecation>
+                        <showDeprecation>${maven.compiler.showDeprecation}</showDeprecation>
                         <showWarnings>true</showWarnings>
                     </configuration>
                 </plugin>
                 <plugin>
                     <groupId>org.codehaus.groovy</groupId>
                     <artifactId>groovy-eclipse-compiler</artifactId>
-                    <version>3.4.0-01</version>
+                    <version>3.7.0</version>
                     <extensions>true</extensions>
                 </plugin>
                 <plugin>
@@ -431,6 +553,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${surefire.version}</version>
                     <configuration>
                         <systemPropertyVariables>
                             <java.awt.headless>true</java.awt.headless>
@@ -444,19 +567,14 @@
                             <exclude>**/*ITSpec.class</exclude>
                         </excludes>
                         <redirectTestOutputToFile>true</redirectTestOutputToFile>
-                        <argLine combine.children="append">-Xmx1G
+                        <forkNode implementation="org.apache.maven.plugin.surefire.extensions.SurefireForkNodeFactory" />
+                        <argLine combine.children="append">-Xmx1g
                             -Djava.net.preferIPv4Stack=true
-                            ${maven.surefire.arguments}
+                            -Duser.language=${user.language}
+                            -Duser.country=${user.country}
+                            -Duser.timezone=${user.timezone}
                             -Dfile.encoding=UTF-8</argLine>
                     </configuration>
-                    <dependencies>
-                        <dependency>
-                            <!-- Force surefire to use JUnit -->
-                            <groupId>org.apache.maven.surefire</groupId>
-                            <artifactId>surefire-junit4</artifactId>
-                            <version>${surefire.version}</version>
-                        </dependency>
-                    </dependencies>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -468,7 +586,7 @@
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>jaxb2-maven-plugin</artifactId>
-                    <version>2.3.1</version>
+                    <version>2.5.0</version>
                 </plugin>
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
@@ -545,7 +663,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
                 <executions>
                     <!-- Only run for tests -->
                     <execution>
@@ -555,6 +672,7 @@
                         </goals>
                         <configuration>
                             <compilerId>groovy-eclipse-compiler</compilerId>
+
                         </configuration>
                     </execution>
                 </executions>
@@ -566,7 +684,7 @@
                     <dependency>
                         <groupId>org.codehaus.groovy</groupId>
                         <artifactId>groovy-eclipse-compiler</artifactId>
-                        <version>3.4.0-01</version>
+                        <version>3.7.0</version>
                     </dependency>
                     <dependency>
                         <groupId>org.codehaus.groovy</groupId>
@@ -578,7 +696,7 @@
             <plugin>
                 <groupId>org.apache.nifi</groupId>
                 <artifactId>nifi-nar-maven-plugin</artifactId>
-                <version>1.3.1</version>
+                <version>1.3.2</version>
                 <extensions>true</extensions>
                 <configuration>
                     <enforceDocGeneration>true</enforceDocGeneration>
@@ -598,7 +716,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.0.0-M3</version>
+                <version>3.0.0</version>
                 <executions>
                     <execution>
                         <id>enforce-maven</id>
@@ -616,7 +734,7 @@
                                 </requireSameVersions>
                                 <requireMavenVersion>
                                     <!-- We do not test this value so we should probably make it something fairly recent -->
-                                    <version>3.1.1</version>
+                                    <version>3.6.0</version>
                                 </requireMavenVersion>
                             </rules>
                         </configuration>
@@ -634,6 +752,7 @@
                                     <failWhenParentIsSnapshot>false</failWhenParentIsSnapshot>
                                     <excludes>
                                         <exclude>org.apache.nifi:*</exclude>
+                                        <exclude>org.apache.nifi.minifi:*</exclude>
                                         <exclude>org.apache.nifi.registry:*</exclude>
                                     </excludes>
                                 </requireReleaseDeps>
@@ -655,6 +774,8 @@
                                         <exclude>c3p0:c3p0:*:*:compile</exclude>
                                         <!-- Versions of JSR305 before 3.0.1 are not allowed https://github.com/findbugsproject/findbugs/issues/128 -->
                                         <exclude>com.google.code.findbugs:jsr305:*:*:compile</exclude>
+                                        <!-- Log4J excluded in favor of log4j-over-slf4j and logback -->
+                                        <exclude>log4j:log4j:*</exclude>
                                     </excludes>
                                     <includes>
                                         <!-- Versions of JSR305 after 3.0.1 are allowed https://github.com/findbugsproject/findbugs/issues/128 -->
@@ -757,8 +878,6 @@
                         <exclude>nb-configuration.xml</exclude> <!-- courtesy excludes for netbeans users -->
                         <exclude>nbactions.xml</exclude> <!-- courtesy excludes for netbeans users -->
                         <exclude>DEPENDENCIES</exclude> <!-- auto generated file by apache's maven config while building sources.zip -->
-                        <exclude>.github/PULL_REQUEST_TEMPLATE.md</exclude> <!-- PR Template for GitHub that does not have a mechanism of including comments -->
-                        <exclude>.github/workflows/ci-workflow.yml</exclude>
                     </excludes>
                 </configuration>
             </plugin>
@@ -886,19 +1005,14 @@
             <dependencyManagement>
                 <dependencies>
                     <dependency>
-                        <groupId>javax.xml.bind</groupId>
-                        <artifactId>jaxb-api</artifactId>
-                        <version>2.3.0</version>
+                        <groupId>jakarta.xml.bind</groupId>
+                        <artifactId>jakarta.xml.bind-api</artifactId>
+                        <version>${jakarta.xml.bind-api.version}</version>
                     </dependency>
                     <dependency>
-                        <groupId>com.sun.xml.bind</groupId>
-                        <artifactId>jaxb-core</artifactId>
-                        <version>2.3.0</version>
-                    </dependency>
-                    <dependency>
-                        <groupId>com.sun.xml.bind</groupId>
-                        <artifactId>jaxb-impl</artifactId>
-                        <version>2.3.0</version>
+                        <groupId>org.glassfish.jaxb</groupId>
+                        <artifactId>jaxb-runtime</artifactId>
+                        <version>${jaxb.runtime.version}</version>
                     </dependency>
                     <dependency>
                         <groupId>com.sun.activation</groupId>
@@ -1004,6 +1118,36 @@
                 <!-- Vendor-specific version number included here as default,
                     should be overridden on the command-line <hadoop.version>2.6.0-cdh5.8.1</hadoop.version> -->
             </properties>
+        </profile>
+        <profile>
+            <!-- Run "mvn clean verify -P owasp" to generate dependency-check-report.html in the target directory -->
+            <!-- Report results require detailed analysis to determine whether the vulnerability impacts the application -->
+            <id>owasp</id>
+            <properties>
+                <skipTests>true</skipTests>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <version>6.3.1</version>
+                        <executions>
+                            <execution>
+                                <inherited>false</inherited>
+                                <goals>
+                                    <goal>aggregate</goal>
+                                </goals>
+                                <configuration>
+                                    <suppressionFiles>nifi-dependency-check-maven/suppressions.xml</suppressionFiles>
+                                    <!-- Skip System Scope to avoid dependency resolution errors with jdk.tools on Java 8 -->
+                                    <skipSystemScope>true</skipSystemScope>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>

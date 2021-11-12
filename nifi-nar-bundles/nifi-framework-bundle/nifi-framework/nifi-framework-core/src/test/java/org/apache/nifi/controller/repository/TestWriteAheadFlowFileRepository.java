@@ -47,6 +47,7 @@ import org.apache.nifi.controller.queue.ListFlowFileStatus;
 import org.apache.nifi.controller.queue.LoadBalanceCompression;
 import org.apache.nifi.controller.queue.LoadBalanceStrategy;
 import org.apache.nifi.controller.queue.NopConnectionEventListener;
+import org.apache.nifi.controller.queue.PollStrategy;
 import org.apache.nifi.controller.queue.QueueDiagnostics;
 import org.apache.nifi.controller.queue.QueueSize;
 import org.apache.nifi.controller.queue.StandardFlowFileQueue;
@@ -173,6 +174,16 @@ public class TestWriteAheadFlowFileRepository {
             }
 
             @Override
+            public long getTotalQueuedDuration(long fromTimestamp) {
+                return 0;
+            }
+
+            @Override
+            public long getMinLastQueueDate() {
+                return 0;
+            }
+
+            @Override
             public boolean isEmpty() {
                 return false;
             }
@@ -209,12 +220,27 @@ public class TestWriteAheadFlowFileRepository {
             }
 
             @Override
+            public FlowFileRecord poll(Set<FlowFileRecord> expiredRecords, PollStrategy pollStrategy) {
+                return null;
+            }
+
+            @Override
             public FlowFileRecord poll(Set<FlowFileRecord> expiredRecords) {
                 return null;
             }
 
             @Override
+            public List<FlowFileRecord> poll(int maxResults, Set<FlowFileRecord> expiredRecords, PollStrategy pollStrategy) {
+                return null;
+            }
+
+            @Override
             public List<FlowFileRecord> poll(int maxResults, Set<FlowFileRecord> expiredRecords) {
+                return null;
+            }
+
+            @Override
+            public List<FlowFileRecord> poll(FlowFileFilter filter, Set<FlowFileRecord> expiredRecords, PollStrategy pollStrategy) {
                 return null;
             }
 
@@ -510,7 +536,7 @@ public class TestWriteAheadFlowFileRepository {
         when(connection.getDestination()).thenReturn(Mockito.mock(Connectable.class));
 
         final FlowFileSwapManager swapMgr = new MockFlowFileSwapManager();
-        final FlowFileQueue queue = new StandardFlowFileQueue("1234", new NopConnectionEventListener(), null, null, claimManager, null, swapMgr, null, 10000, 0L, "0 B");
+        final FlowFileQueue queue = new StandardFlowFileQueue("1234", new NopConnectionEventListener(), null, null, claimManager, null, swapMgr, null, 10000, "0 sec", 0L, "0 B");
 
         when(connection.getFlowFileQueue()).thenReturn(queue);
         queueProvider.addConnection(connection);
@@ -763,7 +789,7 @@ public class TestWriteAheadFlowFileRepository {
                 }
             }
 
-            return new StandardSwapSummary(new QueueSize(records.size(), size), maxId, resourceClaims);
+            return new StandardSwapSummary(new QueueSize(records.size(), size), maxId, resourceClaims, 0L, 0L);
         }
 
         @Override

@@ -29,6 +29,7 @@ import org.apache.nifi.cluster.protocol.NodeProtocolSender;
 import org.apache.nifi.cluster.protocol.StandardDataFlow;
 import org.apache.nifi.components.state.StateProvider;
 import org.apache.nifi.components.validation.ValidationStatus;
+import org.apache.nifi.connectable.Connectable;
 import org.apache.nifi.connectable.Connection;
 import org.apache.nifi.connectable.StandardConnection;
 import org.apache.nifi.controller.ControllerService;
@@ -156,6 +157,7 @@ public class FrameworkIntegrationTest {
     private Bundle systemBundle;
     private ClusterCoordinator clusterCoordinator;
     private NiFiProperties nifiProperties;
+    private StatusHistoryRepository statusHistoryRepository;
 
     public static final Relationship REL_SUCCESS = new Relationship.Builder().name("success").build();
 
@@ -230,6 +232,8 @@ public class FrameworkIntegrationTest {
         systemBundle = SystemBundle.create(nifiProperties);
         extensionManager.discoverExtensions(systemBundle, Collections.emptySet());
 
+        statusHistoryRepository = Mockito.mock(StatusHistoryRepository.class);
+
         final PropertyEncryptor encryptor = createEncryptor();
         final Authorizer authorizer = new AlwaysAuthorizedAuthorizer();
         final AuditService auditService = new NopAuditService();
@@ -265,8 +269,9 @@ public class FrameworkIntegrationTest {
             Mockito.when(clusterCoordinator.getNodeIdentifiers()).thenReturn(nodeIdentifiers);
             Mockito.when(clusterCoordinator.getLocalNodeIdentifier()).thenReturn(localNodeId);
 
-            flowController = FlowController.createClusteredInstance(flowFileEventRepository, nifiProperties, authorizer, auditService, encryptor, protocolSender, bulletinRepo, clusterCoordinator,
-                heartbeatMonitor, leaderElectionManager, VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, flowRegistryClient, extensionManager, Mockito.mock(RevisionManager.class));
+            flowController = FlowController.createClusteredInstance(flowFileEventRepository, nifiProperties, authorizer, auditService, encryptor, protocolSender,
+                    bulletinRepo, clusterCoordinator, heartbeatMonitor, leaderElectionManager, VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, flowRegistryClient,
+                    extensionManager, Mockito.mock(RevisionManager.class), statusHistoryRepository);
 
             flowController.setClustered(true, UUID.randomUUID().toString());
             flowController.setNodeId(localNodeId);
@@ -274,7 +279,7 @@ public class FrameworkIntegrationTest {
             flowController.setConnectionStatus(new NodeConnectionStatus(localNodeId, NodeConnectionState.CONNECTED));
         } else {
             flowController = FlowController.createStandaloneInstance(flowFileEventRepository, nifiProperties, authorizer, auditService, encryptor, bulletinRepo,
-                VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, flowRegistryClient, extensionManager);
+                VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, flowRegistryClient, extensionManager, statusHistoryRepository);
         }
 
         processScheduler = new StandardProcessScheduler(flowEngine, flowController, encryptor, flowController.getStateManagerProvider(), nifiProperties);
@@ -377,21 +382,30 @@ public class FrameworkIntegrationTest {
         FileUtils.deleteFile(dir, true);
     }
 
-    protected FlowFileQueue createFlowFileQueue(final String uuid) {
+    protected FlowFileQueue createFlowFileQueue(final String uuid, final ProcessGroup processGroup) {
         final RepositoryContext repoContext = getRepositoryContext();
         return new StandardFlowFileQueue(uuid, ConnectionEventListener.NOP_EVENT_LISTENER, repoContext.getFlowFileRepository(), repoContext.getProvenanceRepository(),
-            resourceClaimManager, processScheduler, flowFileSwapManager, flowController.createEventReporter(), 20000, 10000L, "1 GB");
+            resourceClaimManager, processScheduler, flowFileSwapManager, flowController.createEventReporter(), 20000,
+                processGroup.getDefaultFlowFileExpiration(), processGroup.getDefaultBackPressureObjectThreshold(), processGroup.getDefaultBackPressureDataSizeThreshold());
     }
 
     protected final ProcessorNode createProcessorNode(final Class<? extends Processor> processorType) {
         return createProcessorNode(processorType.getName());
     }
 
+    protected final ProcessorNode createProcessorNode(final Class<? extends Processor> processorType, final ProcessGroup destination) {
+        return createProcessorNode(processorType.getName(), destination);
+    }
+
     protected final ProcessorNode createProcessorNode(final String processorType) {
+        return createProcessorNode(processorType, rootProcessGroup);
+    }
+
+    protected final ProcessorNode createProcessorNode(final String processorType, final ProcessGroup destination) {
         final String uuid = getSimpleTypeName(processorType) + "-" + UUID.randomUUID().toString();
         final BundleCoordinate bundleCoordinate = SystemBundle.SYSTEM_BUNDLE_COORDINATE;
         final ProcessorNode procNode = flowController.getFlowManager().createProcessor(processorType, uuid, bundleCoordinate, Collections.emptySet(), true, true);
-        rootProcessGroup.addProcessor(procNode);
+        destination.addProcessor(procNode);
 
         return procNode;
     }
@@ -464,24 +478,25 @@ public class FrameworkIntegrationTest {
         return processorNode;
     }
 
-    protected final Connection connect(final ProcessorNode source, final ProcessorNode destination, final Relationship relationship) {
+    protected final Connection connect(final Connectable source, final Connectable destination, final Relationship relationship) {
         return connect(source, destination, Collections.singleton(relationship));
     }
 
-    protected final Connection connect(final ProcessorNode source, final ProcessorNode destination, final Collection<Relationship> relationships) {
+    protected final Connection connect(final Connectable source, final Connectable destination, final Collection<Relationship> relationships) {
         return connect(rootProcessGroup, source, destination, relationships);
     }
 
-    protected final Connection connect(ProcessGroup processGroup, final ProcessorNode source, final ProcessorNode destination, final Collection<Relationship> relationships) {
+    protected final Connection connect(ProcessGroup processGroup, final Connectable source, final Connectable destination, final Collection<Relationship> relationships) {
         final String id = UUID.randomUUID().toString();
         final Connection connection = new StandardConnection.Builder(processScheduler)
-            .source(source)
-            .destination(destination)
-            .relationships(relationships)
-            .id(id)
-            .clustered(false)
-            .flowFileQueueFactory((loadBalanceStrategy, partitioningAttribute, eventListener) -> createFlowFileQueue(id))
-            .build();
+                .source(source)
+                .destination(destination)
+                .processGroup(processGroup)
+                .relationships(relationships)
+                .id(id)
+                .clustered(false)
+                .flowFileQueueFactory((loadBalanceStrategy, partitioningAttribute, eventListener, processGroup1) -> createFlowFileQueue(id, processGroup))
+                .build();
 
         source.addConnection(connection);
         destination.addConnection(connection);
