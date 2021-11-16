@@ -2016,6 +2016,19 @@ public class StandardProcessSession implements ProcessSession, ProvenanceEventEn
     }
 
     @Override
+    public FlowFile penalize(FlowFile flowFile,long milliseconds) {
+        verifyTaskActive();
+
+        flowFile = validateRecordState(flowFile);
+        final StandardRepositoryRecord record = getRecord(flowFile);
+
+        final long expirationEpochMillis = System.currentTimeMillis() + milliseconds;
+        final FlowFileRecord newFile = new StandardFlowFileRecord.Builder().fromFlowFile(record.getCurrent()).penaltyExpirationTime(expirationEpochMillis).build();
+        record.setWorking(newFile, false);
+        return newFile;
+    }
+
+    @Override
     public FlowFile putAttribute(FlowFile flowFile, final String key, final String value) {
         verifyTaskActive();
         flowFile = validateRecordState(flowFile);

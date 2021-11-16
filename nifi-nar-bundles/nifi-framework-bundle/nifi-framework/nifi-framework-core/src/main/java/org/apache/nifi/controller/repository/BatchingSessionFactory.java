@@ -162,6 +162,12 @@ public class BatchingSessionFactory implements ProcessSessionFactory {
         }
 
         @Override
+        public FlowFile penalize(FlowFile flowFile,long milliseconds) {
+            return session.penalize(flowFile,milliseconds);
+        }
+
+
+        @Override
         public FlowFile putAttribute(FlowFile flowFile, String key, String value) {
             return session.putAttribute(flowFile, key, value);
         }
