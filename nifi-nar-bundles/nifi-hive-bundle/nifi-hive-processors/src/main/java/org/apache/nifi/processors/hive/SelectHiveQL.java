@@ -16,36 +16,27 @@
  */
 package org.apache.nifi.processors.hive;
 
-import java.nio.charset.Charset;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.Statement;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-
+import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.Parenthesis;
+import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
+import net.sf.jsqlparser.parser.CCJSqlParserManager;
+import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.Select;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.nifi.annotation.behavior.EventDriven;
-import org.apache.nifi.annotation.behavior.InputRequirement;
+import org.apache.nifi.annotation.behavior.*;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
-import org.apache.nifi.annotation.behavior.WritesAttribute;
-import org.apache.nifi.annotation.behavior.WritesAttributes;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
+import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.components.state.Scope;
+import org.apache.nifi.components.state.StateManager;
+import org.apache.nifi.components.state.StateMap;
 import org.apache.nifi.dbcp.hive.HiveDBCPService;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.FlowFile;
@@ -62,11 +53,25 @@ import org.apache.nifi.util.StopWatch;
 import org.apache.nifi.util.hive.CsvOutputOptions;
 import org.apache.nifi.util.hive.HiveJdbcCommon;
 
-import static org.apache.nifi.util.hive.HiveJdbcCommon.AVRO;
-import static org.apache.nifi.util.hive.HiveJdbcCommon.CSV;
-import static org.apache.nifi.util.hive.HiveJdbcCommon.CSV_MIME_TYPE;
-import static org.apache.nifi.util.hive.HiveJdbcCommon.MIME_TYPE_AVRO_BINARY;
-import static org.apache.nifi.util.hive.HiveJdbcCommon.NORMALIZE_NAMES_FOR_AVRO;
+import java.io.IOException;
+import java.io.StringReader;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.nio.charset.Charset;
+import java.security.MessageDigest;
+import java.sql.*;
+import java.text.DecimalFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.IntStream;
+
+import static java.sql.Types.*;
+import static org.apache.nifi.util.hive.HiveJdbcCommon.*;
 
 @EventDriven
 @InputRequirement(Requirement.INPUT_ALLOWED)
@@ -80,12 +85,6 @@ import static org.apache.nifi.util.hive.HiveJdbcCommon.NORMALIZE_NAMES_FOR_AVRO;
         @WritesAttribute(attribute = "mime.type", description = "Sets the MIME type for the outgoing flowfile to application/avro-binary for Avro or text/csv for CSV."),
         @WritesAttribute(attribute = "filename", description = "Adds .avro or .csv to the filename attribute depending on which output format is selected."),
         @WritesAttribute(attribute = "selecthiveql.row.count", description = "Indicates how many rows were selected/returned by the query."),
-        @WritesAttribute(attribute = "selecthiveql.query.duration", description = "Combined duration of the query execution time and fetch time in milliseconds. "
-                + "If 'Max Rows Per Flow File' is set, then this number will reflect only the fetch time for the rows in the Flow File instead of the entire result set."),
-        @WritesAttribute(attribute = "selecthiveql.query.executiontime", description = "Duration of the query execution time in milliseconds. "
-                + "This number will reflect the query execution time regardless of the 'Max Rows Per Flow File' setting."),
-        @WritesAttribute(attribute = "selecthiveql.query.fetchtime", description = "Duration of the result set fetch time in milliseconds. "
-                + "If 'Max Rows Per Flow File' is set, then this number will reflect only the fetch time for the rows in the Flow File instead of the entire result set."),
         @WritesAttribute(attribute = "fragment.identifier", description = "If 'Max Rows Per Flow File' is set then all FlowFiles from the same query result set "
                 + "will have the same value for the fragment.identifier attribute. This can then be used to correlate the results."),
         @WritesAttribute(attribute = "fragment.count", description = "If 'Max Rows Per Flow File' is set then this is the total number of  "
@@ -97,12 +96,14 @@ import static org.apache.nifi.util.hive.HiveJdbcCommon.NORMALIZE_NAMES_FOR_AVRO;
                 + "FlowFiles were produced"),
         @WritesAttribute(attribute = "query.input.tables", description = "Contains input table names in comma delimited 'databaseName.tableName' format.")
 })
+@Stateful(scopes = Scope.CLUSTER, description = "After performing a query on the specified table, the maximum values for "
+        + "the specified column(s) will be retained for use in future executions of the query. This allows the Processor "
+        + "to fetch only those records that have max values greater than the retained values. This can be used for "
+        + "incremental fetching, fetching of newly added rows, etc. To clear the maximum values, clear the state of the processor "
+        + "per the State Management documentation")
 public class SelectHiveQL extends AbstractHiveQLProcessor {
 
     public static final String RESULT_ROW_COUNT = "selecthiveql.row.count";
-    public static final String RESULT_QUERY_DURATION = "selecthiveql.query.duration";
-    public static final String RESULT_QUERY_EXECUTION_TIME = "selecthiveql.query.executiontime";
-    public static final String RESULT_QUERY_FETCH_TIME = "selecthiveql.query.fetchtime";
 
     // Relationships
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
@@ -118,7 +119,7 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
     public static final PropertyDescriptor HIVEQL_PRE_QUERY = new PropertyDescriptor.Builder()
             .name("hive-pre-query")
             .displayName("HiveQL Pre-Query")
-            .description("A semicolon-delimited list of queries executed before the main SQL query is executed. "
+            .description("HiveQL pre-query to execute. Semicolon-delimited list of queries. "
                     + "Example: 'set tez.queue.name=queue1; set hive.exec.orc.split.strategy=ETL; set hive.exec.reducers.bytes.per.reducer=1073741824'. "
                     + "Note, the results/outputs of these queries will be suppressed if successfully executed.")
             .required(false)
@@ -138,7 +139,7 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
     public static final PropertyDescriptor HIVEQL_POST_QUERY = new PropertyDescriptor.Builder()
             .name("hive-post-query")
             .displayName("HiveQL Post-Query")
-            .description("A semicolon-delimited list of queries executed after the main SQL query is executed. "
+            .description("HiveQL post-query to execute. Semicolon-delimited list of queries. "
                     + "Note, the results/outputs of these queries will be suppressed if successfully executed.")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
@@ -235,9 +236,44 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
             .defaultValue(AVRO)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .build();
+    public static final PropertyDescriptor OUTPUT_BATCH_SIZE = new PropertyDescriptor.Builder()
+            .name("qdbt-output-batch-size")
+            .displayName("Output Batch Size")
+            .description("The number of output FlowFiles to queue before committing the process session. When set to zero, the session will be committed when all result set rows "
+                    + "have been processed and the output FlowFiles are ready for transfer to the downstream relationship. For large result sets, this can cause a large burst of FlowFiles "
+                    + "to be transferred at the end of processor execution. If this property is set, then when the specified number of FlowFiles are ready for transfer, then the session will "
+                    + "be committed, thus releasing the FlowFiles to the downstream relationship. NOTE: The maxvalue.* and fragment.count attributes will not be set on FlowFiles when this "
+                    + "property is set.")
+            .defaultValue("0")
+            .required(true)
+            .addValidator(StandardValidators.NON_NEGATIVE_INTEGER_VALIDATOR)
+            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
+            .build();
+    public static final PropertyDescriptor MAX_VALUE_COLUMN_NAMES = new PropertyDescriptor.Builder()
+            .name("Maximum-value Columns")
+            .description("A comma-separated list of column names. The processor will keep track of the maximum value "
+                    + "for each column that has been returned since the processor started running. Using multiple columns implies an order "
+                    + "to the column list, and each column's values are expected to increase more slowly than the previous columns' values. Thus, "
+                    + "using multiple columns implies a hierarchical structure of columns, which is usually used for partitioning tables. This processor "
+                    + "can be used to retrieve only those rows that have been added/updated since the last retrieval. Note that some "
+                    + "JDBC types such as bit/boolean are not conducive to maintaining maximum value, so columns of these "
+                    + "types should not be listed in this property, and will result in error(s) during processing. If no columns "
+                    + "are provided, all rows from the table will be considered, which could have a performance impact. NOTE: It is important "
+                    + "to use consistent max-value column names for a given table for incremental fetch to work properly.")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+            .build();
 
     private final static List<PropertyDescriptor> propertyDescriptors;
     private final static Set<Relationship> relationships;
+
+    public static final String INITIAL_MAX_VALUE_PROP_START = "initial.maxvalue.";
+    protected Map<String,String> maxValueProperties;
+    protected static final String NAMESPACE_DELIMITER = "@!@";
+    protected final Map<String, Integer> columnTypeMap = new HashMap<>();
+    protected final AtomicBoolean setupComplete = new AtomicBoolean(false);
+    private static SimpleDateFormat TIME_TYPE_FORMAT = new SimpleDateFormat("HH:mm:ss.SSS");
 
     /*
      * Will ensure that the list of property descriptors is built only once.
@@ -251,6 +287,8 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
         _propertyDescriptors.add(HIVEQL_POST_QUERY);
         _propertyDescriptors.add(FETCH_SIZE);
         _propertyDescriptors.add(MAX_ROWS_PER_FLOW_FILE);
+        _propertyDescriptors.add(OUTPUT_BATCH_SIZE);
+        _propertyDescriptors.add(MAX_VALUE_COLUMN_NAMES);
         _propertyDescriptors.add(MAX_FRAGMENTS);
         _propertyDescriptors.add(HIVEQL_OUTPUT_FORMAT);
         _propertyDescriptors.add(NORMALIZE_NAMES_FOR_AVRO);
@@ -280,6 +318,7 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
 
     @OnScheduled
     public void setup(ProcessContext context) {
+        maxValueProperties = getDefaultMaxValueProperties(context, null);
         // If the query is not set, then an incoming flow file is needed. Otherwise fail the initialization
         if (!context.getProperty(HIVEQL_SELECT_QUERY).isSet() && !context.hasIncomingConnection()) {
             final String errorString = "Either the Select Query must be specified or there must be an incoming connection "
@@ -287,6 +326,170 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
             getLogger().error(errorString);
             throw new ProcessException(errorString);
         }
+    }
+
+    @OnStopped
+    public void stop() {
+        // Reset the column type map in case properties change
+        setupComplete.set(false);
+    }
+
+    private static String apendWhereIntoSql(String sql,String appendWhere)
+            throws JSQLParserException {
+        CCJSqlParserManager parserManager = new CCJSqlParserManager();
+        Select select = (Select) parserManager.parse(new StringReader(sql));
+        PlainSelect plain = (PlainSelect) select.getSelectBody();
+        Expression where_expression = plain.getWhere();
+        if(where_expression!=null) {
+            Expression expression = new Parenthesis(where_expression);
+            Expression appendExpression = CCJSqlParserUtil.parseCondExpression(appendWhere);
+            Expression parenthesis = new Parenthesis(appendExpression);
+            Expression newWhere = new AndExpression(parenthesis, expression);
+            plain.setWhere(newWhere);
+        }else{
+            Expression appendExpression = CCJSqlParserUtil.parseCondExpression(appendWhere);
+            Expression parenthesis = new Parenthesis(appendExpression);
+            plain.setWhere(parenthesis);
+        }
+        return plain.toString();
+    }
+
+    public void setup(final ProcessContext context, boolean shouldCleanCache, FlowFile flowFile) {
+        synchronized (setupComplete) {
+            setupComplete.set(false);
+            final String maxValueColumnNames = context.getProperty(MAX_VALUE_COLUMN_NAMES).evaluateAttributeExpressions(flowFile).getValue();
+
+            // If there are no max-value column names specified, we don't need to perform this processing
+            if (StringUtils.isEmpty(maxValueColumnNames)) {
+                setupComplete.set(true);
+                return;
+            }
+            List<String> preQueries = getQueries(context.getProperty(HIVEQL_PRE_QUERY).evaluateAttributeExpressions(flowFile).getValue());
+            // Try to fill the columnTypeMap with the types of the desired max-value columns
+            final HiveDBCPService dbcpService = context.getProperty(HIVE_DBCP_SERVICE).asControllerService(HiveDBCPService.class);
+            try (final Connection con = dbcpService.getConnection(flowFile == null ? Collections.emptyMap() : flowFile.getAttributes());
+                 final Statement st = con.createStatement()) {
+                Pair<String,SQLException> failure = executeConfigStatements(con, preQueries);
+                if (failure != null) {
+                    // In case of failure, assigning config query to "hqlStatement"  to follow current error handling
+                    throw failure.getRight();
+                }
+                String hqlStatement=context.getProperty(HIVEQL_SELECT_QUERY).evaluateAttributeExpressions(flowFile).getValue();
+                String prefix=getMD5(hqlStatement);
+                String query = apendWhereIntoSql(hqlStatement, "1 = 0");
+                ResultSet resultSet = st.executeQuery(query);
+                ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
+                int numCols = resultSetMetaData.getColumnCount();
+                if (numCols > 0) {
+                    if (shouldCleanCache) {
+                        columnTypeMap.clear();
+                    }
+
+                    final List<String> maxValueColumnNameList = Arrays.asList(maxValueColumnNames.toLowerCase().split(","));
+                    final List<String> maxValueQualifiedColumnNameList = new ArrayList<>();
+
+                    for (String maxValueColumn:maxValueColumnNameList) {
+                        String colKey = getStateKey(prefix, maxValueColumn.trim());
+                        maxValueQualifiedColumnNameList.add(colKey);
+                    }
+
+                    for (int i = 1; i <= numCols; i++) {
+                        String colName = resultSetMetaData.getColumnName(i).toLowerCase();
+                        String colKey = getStateKey(prefix, colName);
+
+                        //only include columns that are part of the maximum value tracking column list
+                        if (!maxValueQualifiedColumnNameList.contains(colKey)) {
+                            continue;
+                        }
+
+                        int colType = resultSetMetaData.getColumnType(i);
+                        columnTypeMap.putIfAbsent(colKey, colType);
+                    }
+
+                    for (String maxValueColumn:maxValueColumnNameList) {
+                        String colKey = getStateKey(prefix, maxValueColumn.trim().toLowerCase());
+                        if (!columnTypeMap.containsKey(colKey)) {
+                            throw new ProcessException("Column not found in the table/query specified: " + maxValueColumn);
+                        }
+                    }
+                } else {
+                    throw new ProcessException("No columns found in table from those specified: " + maxValueColumnNames);
+                }
+
+            } catch (SQLException e) {
+                throw new ProcessException("Unable to communicate with database in order to determine column types", e);
+            } catch (JSQLParserException e) {
+                throw new ProcessException("Unable to communicate with database in order to determine column types", e);
+            }
+            setupComplete.set(true);
+        }
+    }
+
+    /**
+     * Returns a SQL literal for the given value based on its type. For example, values of character type need to be enclosed
+     * in single quotes, whereas values of numeric type should not be.
+     *
+     * @param type  The JDBC type for the desired literal
+     * @param value The value to be converted to a SQL literal
+     * @return A String representing the given value as a literal of the given type
+     */
+    private static String getLiteralByType(int type, String value) {
+        switch (type) {
+            case CHAR:
+            case LONGNVARCHAR:
+            case LONGVARCHAR:
+            case NCHAR:
+            case NVARCHAR:
+            case VARCHAR:
+            case ROWID:
+                return "'" + value + "'";
+            case DATE:
+            case TIMESTAMP:
+                return "'" + value + "'";
+            default:
+                return value;
+        }
+    }
+
+    protected String getQuery(String profix,String sqlQuery,List<String> maxValColumnNames, Map<String, String> stateMap) {
+        if (StringUtils.isEmpty(profix)) {
+            throw new IllegalArgumentException("Table name must be specified");
+        }
+        List<String> whereClauses = new ArrayList<>();
+        // Check state map for last max values
+        if (stateMap != null && !stateMap.isEmpty() && maxValColumnNames != null) {
+            IntStream.range(0, maxValColumnNames.size()).forEach((index) -> {
+                String colName = maxValColumnNames.get(index);
+                String maxValueKey = getStateKey(profix, colName);
+                String maxValue = stateMap.get(maxValueKey);
+                if (StringUtils.isEmpty(maxValue)) {
+                    // If we can't find the value at the fully-qualified key name, it is possible (under a previous scheme)
+                    // the value has been stored under a key that is only the column name. Fall back to check the column name; either way, when a new
+                    // maximum value is observed, it will be stored under the fully-qualified key from then on.
+                    maxValue = stateMap.get(colName.toLowerCase());
+                }
+                if (!StringUtils.isEmpty(maxValue)) {
+                    Integer type = columnTypeMap.get(maxValueKey);
+                    if (type == null) {
+                        // This shouldn't happen as we are populating columnTypeMap when the processor is scheduled.
+                        throw new IllegalArgumentException("No column type found for: " + colName);
+                    }
+                    // Add a condition for the WHERE clause
+                    whereClauses.add(colName + (index == 0 ? " > " : " >= ") + getLiteralByType(type, maxValue));
+                }
+            });
+        }
+
+        if (!whereClauses.isEmpty()) {
+            String appendWhere = StringUtils.join(whereClauses, " AND ");
+            try {
+                String newSql = apendWhereIntoSql(sqlQuery, appendWhere);
+                return newSql;
+            } catch (JSQLParserException e) {
+                throw new ProcessException("Unable to communicate with database in order to determine column types", e);
+            }
+        }
+        return sqlQuery;
     }
 
     @Override
@@ -297,6 +500,9 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
     private void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         FlowFile fileToProcess = (context.hasIncomingConnection() ? session.get() : null);
         FlowFile flowfile = null;
+        if (!setupComplete.get()) {
+            this.setup(context,true,null);
+        }
 
         // If we have no FlowFile, and all incoming connections are self-loops then we can continue on.
         // However, if we have no FlowFile and we have connections coming from other Processors, then
@@ -316,6 +522,8 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
 
         final boolean flowbased = !(context.getProperty(HIVEQL_SELECT_QUERY).isSet());
 
+        final String maxValueColumnNames = context.getProperty(MAX_VALUE_COLUMN_NAMES).evaluateAttributeExpressions().getValue();
+
         // Source the SQL
         String hqlStatement;
 
@@ -328,8 +536,7 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
             session.read(fileToProcess, in -> queryContents.append(IOUtils.toString(in, charset)));
             hqlStatement = queryContents.toString();
         }
-
-
+        String prefix=getMD5(hqlStatement);
         final Integer fetchSize = context.getProperty(FETCH_SIZE).evaluateAttributeExpressions(fileToProcess).asInteger();
         final Integer maxRowsPerFlowFile = context.getProperty(MAX_ROWS_PER_FLOW_FILE).evaluateAttributeExpressions(fileToProcess).asInteger();
         final Integer maxFragments = context.getProperty(MAX_FRAGMENTS).isSet()
@@ -342,16 +549,59 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
         final String altHeader = context.getProperty(HIVEQL_CSV_ALT_HEADER).evaluateAttributeExpressions(fileToProcess).getValue();
         final String delimiter = context.getProperty(HIVEQL_CSV_DELIMITER).evaluateAttributeExpressions(fileToProcess).getValue();
         final boolean quote = context.getProperty(HIVEQL_CSV_QUOTE).asBoolean();
-        final boolean escape = context.getProperty(HIVEQL_CSV_ESCAPE).asBoolean();
+        final boolean escape = context.getProperty(HIVEQL_CSV_HEADER).asBoolean();
+        final Integer outputBatchSizeField = context.getProperty(OUTPUT_BATCH_SIZE).evaluateAttributeExpressions().asInteger();
+        final int outputBatchSize = outputBatchSizeField == null ? 0 : outputBatchSizeField;
         final String fragmentIdentifier = UUID.randomUUID().toString();
 
+
+        final StateManager stateManager = context.getStateManager();
+        final StateMap stateMap;
+
+        try {
+            stateMap = stateManager.getState(Scope.CLUSTER);
+        } catch (final IOException ioe) {
+            getLogger().error("Failed to retrieve observed maximum values from the State Manager. Will not perform "
+                    + "query until this is accomplished.", ioe);
+            context.yield();
+            return;
+        }
+        // Make a mutable copy of the current state property map. This will be updated by the result row callback, and eventually
+        // set as the current state map (after the session has been committed)
+        final Map<String, String> statePropertyMap = new HashMap<>(stateMap.toMap());
+
+        //If an initial max value for column(s) has been specified using properties, and this column is not in the state manager, sync them to the state property map
+        for (final Map.Entry<String, String> maxProp : maxValueProperties.entrySet()) {
+            String maxPropKey = maxProp.getKey().toLowerCase();
+            String fullyQualifiedMaxPropKey = getStateKey(prefix, maxPropKey);
+            if (!statePropertyMap.containsKey(fullyQualifiedMaxPropKey)) {
+                String newMaxPropValue;
+                // If we can't find the value at the fully-qualified key name, it is possible (under a previous scheme)
+                // the value has been stored under a key that is only the column name. Fall back to check the column name,
+                // but store the new initial max value under the fully-qualified key.
+                if (statePropertyMap.containsKey(maxPropKey)) {
+                    newMaxPropValue = statePropertyMap.get(maxPropKey);
+                } else {
+                    newMaxPropValue = maxProp.getValue();
+                }
+                statePropertyMap.put(fullyQualifiedMaxPropKey, newMaxPropValue);
+
+            }
+        }
+        List<String> maxValueColumnNameList = StringUtils.isEmpty(maxValueColumnNames)
+                ? null
+                : Arrays.asList(maxValueColumnNames.split("\\s*,\\s*"));
+        String selectQuery = getQuery(prefix, hqlStatement, maxValueColumnNameList, statePropertyMap);
+        this.getLogger().info("执行sql->"+selectQuery);
         try (final Connection con = dbcpService.getConnection(fileToProcess == null ? Collections.emptyMap() : fileToProcess.getAttributes());
-             final Statement st = (flowbased ? con.prepareStatement(hqlStatement) : con.createStatement())
+             final Statement st = (flowbased ? con.prepareStatement(selectQuery) : con.createStatement())
         ) {
+            // Max values will be updated in the state property map by the callback
+            final MaxValueResultSetRowCollector maxValCollector = new MaxValueResultSetRowCollector(prefix, statePropertyMap);
             Pair<String,SQLException> failure = executeConfigStatements(con, preQueries);
             if (failure != null) {
                 // In case of failure, assigning config query to "hqlStatement"  to follow current error handling
-                hqlStatement = failure.getLeft();
+                selectQuery = failure.getLeft();
                 flowfile = (fileToProcess == null) ? session.create() : fileToProcess;
                 fileToProcess = null;
                 throw failure.getRight();
@@ -367,39 +617,35 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
 
             final List<FlowFile> resultSetFlowFiles = new ArrayList<>();
             try {
-                logger.debug("Executing query {}", new Object[]{hqlStatement});
+                logger.debug("Executing query {}", new Object[]{selectQuery});
                 if (flowbased) {
                     // Hive JDBC Doesn't Support this yet:
                     // ParameterMetaData pmd = ((PreparedStatement)st).getParameterMetaData();
                     // int paramCount = pmd.getParameterCount();
 
                     // Alternate way to determine number of params in SQL.
-                    int paramCount = StringUtils.countMatches(hqlStatement, "?");
+                    int paramCount = StringUtils.countMatches(selectQuery, "?");
 
                     if (paramCount > 0) {
                         setParameters(1, (PreparedStatement) st, paramCount, fileToProcess.getAttributes());
                     }
                 }
 
-                final StopWatch executionTime = new StopWatch(true);
                 final ResultSet resultSet;
 
                 try {
-                    resultSet = (flowbased ? ((PreparedStatement) st).executeQuery() : st.executeQuery(hqlStatement));
+                    resultSet = (flowbased ? ((PreparedStatement) st).executeQuery() : st.executeQuery(selectQuery));
                 } catch (SQLException se) {
                     // If an error occurs during the query, a flowfile is expected to be routed to failure, so ensure one here
                     flowfile = (fileToProcess == null) ? session.create() : fileToProcess;
                     fileToProcess = null;
                     throw se;
                 }
-                long executionTimeElapsed = executionTime.getElapsed(TimeUnit.MILLISECONDS);
 
                 int fragmentIndex = 0;
                 String baseFilename = (fileToProcess != null) ? fileToProcess.getAttribute(CoreAttributes.FILENAME.key()) : null;
                 while (true) {
                     final AtomicLong nrOfRows = new AtomicLong(0L);
-                    final StopWatch fetchTime = new StopWatch(true);
-
                     flowfile = (fileToProcess == null) ? session.create() : session.create(fileToProcess);
                     if (baseFilename == null) {
                         baseFilename = flowfile.getAttribute(CoreAttributes.FILENAME.key());
@@ -408,10 +654,10 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                         flowfile = session.write(flowfile, out -> {
                             try {
                                 if (AVRO.equals(outputFormat)) {
-                                    nrOfRows.set(HiveJdbcCommon.convertToAvroStream(resultSet, out, maxRowsPerFlowFile, convertNamesForAvro));
+                                    nrOfRows.set(HiveJdbcCommon.convertToAvroStream(resultSet, out, null,maxRowsPerFlowFile, convertNamesForAvro,maxValCollector));
                                 } else if (CSV.equals(outputFormat)) {
                                     CsvOutputOptions options = new CsvOutputOptions(header, altHeader, delimiter, quote, escape, maxRowsPerFlowFile);
-                                    nrOfRows.set(HiveJdbcCommon.convertToCsvStream(resultSet, out, options));
+                                    nrOfRows.set(HiveJdbcCommon.convertToCsvStream(resultSet, out,null,maxValCollector, options));
                                 } else {
                                     nrOfRows.set(0L);
                                     throw new ProcessException("Unsupported output format: " + outputFormat);
@@ -425,7 +671,6 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                         resultSetFlowFiles.add(flowfile);
                         throw e;
                     }
-                    long fetchTimeElapsed = fetchTime.getElapsed(TimeUnit.MILLISECONDS);
 
                     if (nrOfRows.get() > 0 || resultSetFlowFiles.isEmpty()) {
                         final Map<String, String> attributes = new HashMap<>();
@@ -434,10 +679,10 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
 
                         try {
                             // Set input/output table names by parsing the query
-                            attributes.putAll(toQueryTableAttributes(findTableNames(hqlStatement)));
+                            attributes.putAll(toQueryTableAttributes(findTableNames(selectQuery)));
                         } catch (Exception e) {
                             // If failed to parse the query, just log a warning message, but continue.
-                            getLogger().warn("Failed to parse query: {} due to {}", new Object[]{hqlStatement, e}, e);
+                            getLogger().warn("Failed to parse query: {} due to {}", new Object[]{selectQuery, e}, e);
                         }
 
                         // Set MIME type on output document and add extension to filename
@@ -454,10 +699,6 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                             attributes.put("fragment.index", String.valueOf(fragmentIndex));
                         }
 
-                        attributes.put(RESULT_QUERY_DURATION, String.valueOf(executionTimeElapsed + fetchTimeElapsed));
-                        attributes.put(RESULT_QUERY_EXECUTION_TIME, String.valueOf(executionTimeElapsed));
-                        attributes.put(RESULT_QUERY_FETCH_TIME, String.valueOf(fetchTimeElapsed));
-
                         flowfile = session.putAllAttributes(flowfile, attributes);
 
                         logger.info("{} contains {} " + outputFormat + " records; transferring to 'success'",
@@ -472,6 +713,13 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                             session.getProvenanceReporter().receive(flowfile, dbcpService.getConnectionURL(), stopWatch.getElapsed(TimeUnit.MILLISECONDS));
                         }
                         resultSetFlowFiles.add(flowfile);
+                        // If we've reached the batch size, send out the flow files
+                        if (outputBatchSize > 0 && resultSetFlowFiles.size() >= outputBatchSize) {
+                            session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
+                            session.transfer(resultSetFlowFiles, REL_SUCCESS);
+                            session.commit();
+                            resultSetFlowFiles.clear();
+                        }
                     } else {
                         // If there were no rows returned (and the first flow file has been sent, we're done processing, so remove the flowfile and carry on
                         session.remove(flowfile);
@@ -499,9 +747,12 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                 throw e;
             }
 
+            // Apply state changes from the Max Value tracker
+            maxValCollector.applyStateChanges();
+
             failure = executeConfigStatements(con, postQueries);
             if (failure != null) {
-                hqlStatement = failure.getLeft();
+                selectQuery = failure.getLeft();
                 if (resultSetFlowFiles != null) {
                     resultSetFlowFiles.forEach(ff -> session.remove(ff));
                 }
@@ -510,28 +761,37 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                 throw failure.getRight();
             }
 
+            session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
             session.transfer(resultSetFlowFiles, REL_SUCCESS);
             if (fileToProcess != null) {
                 session.remove(fileToProcess);
             }
         } catch (final ProcessException | SQLException e) {
-            logger.error("Issue processing SQL {} due to {}.", new Object[]{hqlStatement, e});
+            logger.error("Issue processing SQL {} due to {}.", new Object[]{selectQuery, e});
             if (flowfile == null) {
                 // This can happen if any exceptions occur while setting up the connection, statement, etc.
                 logger.error("Unable to execute HiveQL select query {} due to {}. No FlowFile to route to failure",
-                        new Object[]{hqlStatement, e});
+                        new Object[]{selectQuery, e});
                 context.yield();
             } else {
                 if (context.hasIncomingConnection()) {
                     logger.error("Unable to execute HiveQL select query {} for {} due to {}; routing to failure",
-                            new Object[]{hqlStatement, flowfile, e});
+                            new Object[]{selectQuery, flowfile, e});
                     flowfile = session.penalize(flowfile);
                 } else {
                     logger.error("Unable to execute HiveQL select query {} due to {}; routing to failure",
-                            new Object[]{hqlStatement, e});
+                            new Object[]{selectQuery, e});
                     context.yield();
                 }
                 session.transfer(flowfile, REL_FAILURE);
+            }
+        } finally {
+            session.commit();
+            try {
+                // Update the state
+                stateManager.setState(statePropertyMap, Scope.CLUSTER);
+            } catch (IOException ioe) {
+                getLogger().error("{} failed to update State Manager, maximum observed values will not be recorded", new Object[]{this, ioe});
             }
         }
     }
@@ -566,5 +826,252 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
             }
         }
         return queries;
+    }
+
+    private Map<String, String> getDefaultMaxValueProperties(final ProcessContext context, final FlowFile flowFile) {
+        final Map<String, String> defaultMaxValues = new HashMap<>();
+
+        context.getProperties().forEach((k, v) -> {
+            final String key = k.getName();
+
+            if (key.startsWith(INITIAL_MAX_VALUE_PROP_START)) {
+                defaultMaxValues.put(key.substring(INITIAL_MAX_VALUE_PROP_START.length()), context.getProperty(k).evaluateAttributeExpressions(flowFile).getValue());
+            }
+        });
+        return defaultMaxValues;
+    }
+
+    /**
+     * Construct a key string for a corresponding state value.
+     * @param prefix A prefix may contain database and table name, or just table name, this can be null
+     * @param columnName A column name
+     * @return a state key string
+     */
+    private static String getStateKey(String prefix, String columnName) {
+        StringBuilder sb = new StringBuilder();
+        if (prefix != null) {
+            sb.append(unwrapIdentifier(prefix.toLowerCase()));
+            sb.append(NAMESPACE_DELIMITER);
+        }
+        if (columnName != null) {
+            sb.append(unwrapIdentifier(columnName.toLowerCase()));
+        }
+        return sb.toString();
+    }
+
+    public static String unwrapIdentifier(String identifier) {
+        // Removes double quotes and back-ticks.
+        return identifier == null ? null : identifier.replaceAll("[\"`]", "");
+    }
+
+    /**
+     * 对字符串md5加密(小写+字母)
+     *
+     * @param str 传入要加密的字符串
+     * @return  MD5加密后的字符串
+     */
+    public static String getMD5(String str) {
+        try {
+            // 生成一个MD5加密计算摘要
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            // 计算md5函数
+            md.update(str.getBytes());
+            // digest()最后确定返回md5 hash值，返回值为8为字符串。因为md5 hash值是16位的hex值，实际上就是8位的字符
+            // BigInteger函数则将8位的字符串转换成16位hex值，用字符串来表示；得到字符串形式的hash值
+            return new BigInteger(1, md.digest()).toString(16);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    protected static String getMaxValueFromRow(ResultSet resultSet,
+                                               int columnIndex,
+                                               Integer type,
+                                               String maxValueString)
+            throws ParseException, IOException, SQLException {
+
+        // Skip any columns we're not keeping track of or whose value is null
+        if (type == null || resultSet.getObject(columnIndex) == null) {
+            return null;
+        }
+
+        switch (type) {
+            case CHAR:
+            case LONGNVARCHAR:
+            case LONGVARCHAR:
+            case NCHAR:
+            case NVARCHAR:
+            case VARCHAR:
+            case ROWID:
+                String colStringValue = resultSet.getString(columnIndex);
+                if (maxValueString == null || colStringValue.compareTo(maxValueString) > 0) {
+                    return colStringValue;
+                }
+                break;
+
+            case INTEGER:
+            case SMALLINT:
+            case TINYINT:
+                Integer colIntValue = resultSet.getInt(columnIndex);
+                Integer maxIntValue = null;
+                if (maxValueString != null) {
+                    maxIntValue = Integer.valueOf(maxValueString);
+                }
+                if (maxIntValue == null || colIntValue > maxIntValue) {
+                    return colIntValue.toString();
+                }
+                break;
+
+            case BIGINT:
+                Long colLongValue = resultSet.getLong(columnIndex);
+                Long maxLongValue = null;
+                if (maxValueString != null) {
+                    maxLongValue = Long.valueOf(maxValueString);
+                }
+                if (maxLongValue == null || colLongValue > maxLongValue) {
+                    return colLongValue.toString();
+                }
+                break;
+
+            case FLOAT:
+            case REAL:
+            case DOUBLE:
+                Double colDoubleValue = resultSet.getDouble(columnIndex);
+                Double maxDoubleValue = null;
+                if (maxValueString != null) {
+                    maxDoubleValue = Double.valueOf(maxValueString);
+                }
+                if (maxDoubleValue == null || colDoubleValue > maxDoubleValue) {
+                    return colDoubleValue.toString();
+                }
+                break;
+
+            case DECIMAL:
+            case NUMERIC:
+                BigDecimal colBigDecimalValue = resultSet.getBigDecimal(columnIndex);
+                BigDecimal maxBigDecimalValue = null;
+                if (maxValueString != null) {
+                    DecimalFormat df = new DecimalFormat();
+                    df.setParseBigDecimal(true);
+                    maxBigDecimalValue = (BigDecimal) df.parse(maxValueString);
+                }
+                if (maxBigDecimalValue == null || colBigDecimalValue.compareTo(maxBigDecimalValue) > 0) {
+                    return colBigDecimalValue.toString();
+                }
+                break;
+
+            case DATE:
+                Date rawColDateValue = resultSet.getDate(columnIndex);
+                java.sql.Date colDateValue = new java.sql.Date(rawColDateValue.getTime());
+                java.sql.Date maxDateValue = null;
+                if (maxValueString != null) {
+                    maxDateValue = java.sql.Date.valueOf(maxValueString);
+                }
+                if (maxDateValue == null || colDateValue.after(maxDateValue)) {
+                    return colDateValue.toString();
+                }
+                break;
+
+            case TIME:
+                // Compare milliseconds-since-epoch. Need getTimestamp() instead of getTime() since some databases
+                // don't return milliseconds in the Time returned by getTime().
+                Date colTimeValue = new Date(resultSet.getTimestamp(columnIndex).getTime());
+                Date maxTimeValue = null;
+                if (maxValueString != null) {
+                    try {
+                        maxTimeValue = TIME_TYPE_FORMAT.parse(maxValueString);
+                    } catch (ParseException pe) {
+                        // Shouldn't happen, but just in case, leave the value as null so the new value will be stored
+                    }
+                }
+                if (maxTimeValue == null || colTimeValue.after(maxTimeValue)) {
+                    return TIME_TYPE_FORMAT.format(colTimeValue);
+                }
+                break;
+
+            case TIMESTAMP:
+                Timestamp colTimestampValue = resultSet.getTimestamp(columnIndex);
+                java.sql.Timestamp maxTimestampValue = null;
+                if (maxValueString != null) {
+                    // For backwards compatibility, the type might be TIMESTAMP but the state value is in DATE format. This should be a one-time occurrence as the next maximum value
+                    // should be stored as a full timestamp. Even so, check to see if the value is missing time-of-day information, and use the "date" coercion rather than the
+                    // "timestamp" coercion in that case
+                    try {
+                        maxTimestampValue = java.sql.Timestamp.valueOf(maxValueString);
+                    } catch (IllegalArgumentException iae) {
+                        maxTimestampValue = new java.sql.Timestamp(java.sql.Date.valueOf(maxValueString).getTime());
+                    }
+                }
+                if (maxTimestampValue == null || colTimestampValue.after(maxTimestampValue)) {
+                    return colTimestampValue.toString();
+                }
+                break;
+
+            case BIT:
+            case BOOLEAN:
+            case BINARY:
+            case VARBINARY:
+            case LONGVARBINARY:
+            case ARRAY:
+            case BLOB:
+            case CLOB:
+            default:
+                throw new IOException("Type for column " + columnIndex + " is not valid for maintaining maximum value");
+        }
+        return null;
+    }
+
+    public class MaxValueResultSetRowCollector implements HiveJdbcCommon.ResultSetRowCallback {
+        final Map<String, String> newColMap;
+        final Map<String, String> originalState;
+        String tableName;
+
+        public MaxValueResultSetRowCollector(String tableName, Map<String, String> stateMap) {
+            this.originalState = stateMap;
+            this.newColMap = new HashMap<>();
+            this.newColMap.putAll(stateMap);
+            this.tableName = tableName;
+        }
+
+        @Override
+        public void processRow(ResultSet resultSet) throws IOException {
+            if (resultSet == null) {
+                return;
+            }
+            try {
+                // Iterate over the row, check-and-set max values
+                final ResultSetMetaData meta = resultSet.getMetaData();
+                final int nrOfColumns = meta.getColumnCount();
+                if (nrOfColumns > 0) {
+                    for (int i = 1; i <= nrOfColumns; i++) {
+                        String colName = meta.getColumnName(i).toLowerCase();
+                        String fullyQualifiedMaxValueKey = getStateKey(tableName, colName);
+                        Integer type = columnTypeMap.get(fullyQualifiedMaxValueKey);
+                        // Skip any columns we're not keeping track of or whose value is null
+                        if (type == null || resultSet.getObject(i) == null) {
+                            continue;
+                        }
+                        String maxValueString = newColMap.get(fullyQualifiedMaxValueKey);
+                        // If we can't find the value at the fully-qualified key name, it is possible (under a previous scheme)
+                        // the value has been stored under a key that is only the column name. Fall back to check the column name; either way, when a new
+                        // maximum value is observed, it will be stored under the fully-qualified key from then on.
+                        if (StringUtils.isEmpty(maxValueString)) {
+                            maxValueString = newColMap.get(colName);
+                        }
+                        String newMaxValueString = getMaxValueFromRow(resultSet, i, type, maxValueString);
+                        if (newMaxValueString != null) {
+                            newColMap.put(fullyQualifiedMaxValueKey, newMaxValueString);
+                        }
+                    }
+                }
+            } catch (ParseException | SQLException e) {
+                throw new IOException(e);
+            }
+        }
+
+        public void applyStateChanges() {
+            this.originalState.putAll(this.newColMap);
+        }
     }
 }

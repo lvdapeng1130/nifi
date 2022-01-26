@@ -182,5 +182,10 @@
             <version>1.15.0.kg</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+            <version>4.0</version>
+        </dependency>
     </dependencies>
 </project>
