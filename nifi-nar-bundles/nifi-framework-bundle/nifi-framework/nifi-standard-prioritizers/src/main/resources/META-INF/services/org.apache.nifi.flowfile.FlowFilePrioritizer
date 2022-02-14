@@ -16,3 +16,4 @@ org.apache.nifi.prioritizer.FirstInFirstOutPrioritizer
 org.apache.nifi.prioritizer.NewestFlowFileFirstPrioritizer
 org.apache.nifi.prioritizer.OldestFlowFileFirstPrioritizer
 org.apache.nifi.prioritizer.PriorityAttributePrioritizer
+org.apache.nifi.prioritizer.RandomPrioritizer
