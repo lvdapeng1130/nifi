@@ -185,6 +185,7 @@ public class ZooKeeperClientConfig {
                 NiFiProperties.DEFAULT_ZOOKEEPER_KERBEROS_REMOVE_REALM_FROM_PRINCIPAL);
         final int juteMaxbuffer = nifiProperties.getIntegerProperty(NiFiProperties.ZOOKEEPER_JUTE_MAXBUFFER, NiFiProperties.DEFAULT_ZOOKEEPER_JUTE_MAXBUFFER);
         final boolean enableClientSasl=nifiProperties.isEnableClientSasl();
+        logger.info("nifi.zookeeper.enable.sasl.client-->"+enableClientSasl);
         try {
             PathUtils.validatePath(rootPath);
         } catch (final IllegalArgumentException e) {
