@@ -271,6 +271,7 @@ public class NiFiProperties extends ApplicationProperties {
     public static final String ZOOKEEPER_SESSION_TIMEOUT = "nifi.zookeeper.session.timeout";
     public static final String ZOOKEEPER_ROOT_NODE = "nifi.zookeeper.root.node";
     public static final String ZOOKEEPER_CLIENT_SECURE = "nifi.zookeeper.client.secure";
+    public static final String ZOOKEEPER_SASL_CLIENT = "nifi.zookeeper.enable.sasl.client";
     public static final String ZOOKEEPER_SECURITY_KEYSTORE = "nifi.zookeeper.security.keystore";
     public static final String ZOOKEEPER_SECURITY_KEYSTORE_TYPE = "nifi.zookeeper.security.keystoreType";
     public static final String ZOOKEEPER_SECURITY_KEYSTORE_PASSWD = "nifi.zookeeper.security.keystorePasswd";
@@ -354,6 +355,7 @@ public class NiFiProperties extends ApplicationProperties {
     public static final String DEFAULT_ZOOKEEPER_SESSION_TIMEOUT = "3 secs";
     public static final String DEFAULT_ZOOKEEPER_ROOT_NODE = "/nifi";
     public static final boolean DEFAULT_ZOOKEEPER_CLIENT_SECURE = false;
+    public static final boolean ENABLE_CLIENT_SASL_DEFAULT = true;
     public static final String DEFAULT_ZOOKEEPER_AUTH_TYPE = "default";
     public static final String DEFAULT_ZOOKEEPER_KERBEROS_REMOVE_HOST_FROM_PRINCIPAL = "true";
     public static final String DEFAULT_ZOOKEEPER_KERBEROS_REMOVE_REALM_FROM_PRINCIPAL = "true";
@@ -1625,6 +1627,17 @@ public class NiFiProperties extends ApplicationProperties {
     public boolean isZooKeeperClientSecure() {
         final String defaultValue = String.valueOf(DEFAULT_ZOOKEEPER_CLIENT_SECURE);
         final String clientSecure = getProperty(ZOOKEEPER_CLIENT_SECURE, defaultValue).trim();
+
+        if (!"true".equalsIgnoreCase(clientSecure) && !"false".equalsIgnoreCase(clientSecure)) {
+            throw new RuntimeException(String.format("%s was '%s', expected true or false", NiFiProperties.ZOOKEEPER_CLIENT_SECURE, clientSecure));
+        }
+
+        return Boolean.parseBoolean(clientSecure);
+    }
+
+    public boolean isEnableClientSasl() {
+        final String defaultValue = String.valueOf(ENABLE_CLIENT_SASL_DEFAULT);
+        final String clientSecure = getProperty(ZOOKEEPER_SASL_CLIENT, defaultValue).trim();
 
         if (!"true".equalsIgnoreCase(clientSecure) && !"false".equalsIgnoreCase(clientSecure)) {
             throw new RuntimeException(String.format("%s was '%s', expected true or false", NiFiProperties.ZOOKEEPER_CLIENT_SECURE, clientSecure));

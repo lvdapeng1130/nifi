@@ -55,12 +55,13 @@ public class ZooKeeperClientConfig {
     private final String removeHostFromPrincipal;
     private final String removeRealmFromPrincipal;
     private final int juteMaxbuffer;
+    private final boolean enableClientSasl;
 
     private ZooKeeperClientConfig(String connectString, int sessionTimeoutMillis, int connectionTimeoutMillis,
                                   String rootPath, String authType, String authPrincipal, String removeHostFromPrincipal,
                                   String removeRealmFromPrincipal, boolean clientSecure, String keyStore, String keyStoreType,
                                   String keyStorePassword, String trustStore, String trustStoreType, String trustStorePassword,
-                                  final int juteMaxbuffer) {
+                                  final int juteMaxbuffer,boolean enableClientSasl) {
         this.connectString = connectString;
         this.sessionTimeoutMillis = sessionTimeoutMillis;
         this.connectionTimeoutMillis = connectionTimeoutMillis;
@@ -77,6 +78,7 @@ public class ZooKeeperClientConfig {
         this.removeHostFromPrincipal = removeHostFromPrincipal;
         this.removeRealmFromPrincipal = removeRealmFromPrincipal;
         this.juteMaxbuffer = juteMaxbuffer;
+        this.enableClientSasl=enableClientSasl;
     }
 
     public String getConnectString() {
@@ -182,7 +184,7 @@ public class ZooKeeperClientConfig {
         final String removeRealmFromPrincipal = nifiProperties.getProperty(NiFiProperties.ZOOKEEPER_KERBEROS_REMOVE_REALM_FROM_PRINCIPAL,
                 NiFiProperties.DEFAULT_ZOOKEEPER_KERBEROS_REMOVE_REALM_FROM_PRINCIPAL);
         final int juteMaxbuffer = nifiProperties.getIntegerProperty(NiFiProperties.ZOOKEEPER_JUTE_MAXBUFFER, NiFiProperties.DEFAULT_ZOOKEEPER_JUTE_MAXBUFFER);
-
+        final boolean enableClientSasl=nifiProperties.isEnableClientSasl();
         try {
             PathUtils.validatePath(rootPath);
         } catch (final IllegalArgumentException e) {
@@ -205,7 +207,8 @@ public class ZooKeeperClientConfig {
             trustStore,
             trustStoreType,
             trustStorePassword,
-            juteMaxbuffer
+            juteMaxbuffer,
+            enableClientSasl
         );
     }
 
@@ -276,5 +279,9 @@ public class ZooKeeperClientConfig {
             }
         }
         return StringUtils.join(cleanedEntries, ",");
+    }
+
+    public boolean isEnableClientSasl() {
+        return enableClientSasl;
     }
 }

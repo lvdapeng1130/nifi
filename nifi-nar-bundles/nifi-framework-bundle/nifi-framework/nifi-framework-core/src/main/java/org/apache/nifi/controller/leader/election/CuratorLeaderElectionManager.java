@@ -682,6 +682,8 @@ public class CuratorLeaderElectionManager implements LeaderElectionManager {
             zkSecureClientConfig.setProperty(clientX509util.getSslTruststoreTypeProperty(), zkConfig.getTrustStoreType());
             zkSecureClientConfig.setProperty(clientX509util.getSslTruststorePasswdProperty(), zkConfig.getTrustStorePassword());
             zkSecureClientConfig.setProperty(ZKConfig.JUTE_MAXBUFFER, Integer.toString(zkConfig.getJuteMaxbuffer()));
+
+            zkSecureClientConfig.setProperty(ZKClientConfig.ENABLE_CLIENT_SASL_KEY, String.valueOf(zkConfig.isEnableClientSasl()));
         }
 
         @Override

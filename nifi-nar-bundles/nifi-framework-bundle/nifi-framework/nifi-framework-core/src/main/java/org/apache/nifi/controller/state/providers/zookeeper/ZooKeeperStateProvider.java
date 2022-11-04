@@ -226,6 +226,7 @@ public class ZooKeeperStateProvider extends AbstractStateProvider {
                 final ZKClientConfig zkClientConfig = new ZKClientConfig();
                 if (clientConfig != null) {
                     zkClientConfig.setProperty(ZKConfig.JUTE_MAXBUFFER, Integer.toString(clientConfig.getJuteMaxbuffer()));
+                    zkClientConfig.setProperty(ZKClientConfig.ENABLE_CLIENT_SASL_KEY, String.valueOf(clientConfig.isEnableClientSasl()));
                 }
                 zooKeeper = new ZooKeeper(connectionString, timeoutMillis, new NoOpWatcher(), zkClientConfig);
                 logger.debug("Standard ZooKeeper Client connection [{}] created", connectionString);

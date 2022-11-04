@@ -55,6 +55,8 @@ public class SecureClientZooKeeperFactory implements ZookeeperFactory {
         zkSecureClientConfig.setProperty(clientX509util.getSslTruststoreLocationProperty(), zkConfig.getTrustStore());
         zkSecureClientConfig.setProperty(clientX509util.getSslTruststoreTypeProperty(), zkConfig.getTrustStoreType());
         zkSecureClientConfig.setProperty(clientX509util.getSslTruststorePasswdProperty(), zkConfig.getTrustStorePassword());
+
+        zkSecureClientConfig.setProperty(ZKClientConfig.ENABLE_CLIENT_SASL_KEY, String.valueOf(zkConfig.isEnableClientSasl()));
     }
 
     @Override
