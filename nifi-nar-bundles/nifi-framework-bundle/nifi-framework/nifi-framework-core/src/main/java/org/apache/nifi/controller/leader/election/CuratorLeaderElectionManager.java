@@ -27,6 +27,7 @@ import org.apache.curator.framework.recipes.leader.Participant;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.retry.RetryNTimes;
 import org.apache.curator.utils.ZookeeperFactory;
+import org.apache.nifi.controller.cluster.DefaultZookeeperFactory;
 import org.apache.nifi.controller.cluster.ZooKeeperClientConfig;
 import org.apache.nifi.engine.FlowEngine;
 import org.apache.nifi.util.NiFiProperties;
@@ -428,6 +429,9 @@ public class CuratorLeaderElectionManager implements LeaderElectionManager {
 
         if (zkConfig.isClientSecure()) {
             clientBuilder.zookeeperFactory(new SecureClientZooKeeperFactory(zkConfig));
+        }else{
+            logger.info("CuratorFrameworkFactory set zookeeperFactory org.apache.nifi.controller.cluster.DefaultZookeeperFactory");
+            clientBuilder.zookeeperFactory(new DefaultZookeeperFactory(zkConfig));
         }
 
         final CuratorFramework client = clientBuilder.build();
