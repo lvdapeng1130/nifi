@@ -539,7 +539,7 @@ public class ITZooKeeperStateServerTLS {
 
         ZookeeperFactory factory = null;
         try {
-            factory = new DefaultZookeeperFactory();
+            factory = new DefaultZookeeperFactory(zkClientConfig);
         } catch (Exception e) {
             e.printStackTrace();
         }
