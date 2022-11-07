@@ -23,17 +23,11 @@
 
     <artifactId>nifi-site-to-site-reporting-task</artifactId>
     <description>Publishes NiFi metrics and provenance events via S2S</description>
-    <version>1.18.0</version>
 
     <dependencies>
         <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-processor-utils</artifactId>
-            <version>1.18.0</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -123,5 +117,4 @@
             </plugin>
         </plugins>
     </build>
-    
 </project>

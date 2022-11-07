@@ -136,7 +136,7 @@ public class TestLoadBalanceSession {
         while (transaction.communicate()) {
         }
 
-        assertTrue(transaction.isComplete());
+        assertTrue(transaction.getSessionState().isComplete());
         socketChannel.close();
 
         final Checksum expectedChecksum = new CRC32();
@@ -190,7 +190,7 @@ public class TestLoadBalanceSession {
 
         assertArrayEquals(expectedSent, dataSent);
 
-        assertEquals(Arrays.asList(flowFile1, flowFile2), transaction.getFlowFilesSent());
+        assertEquals(Arrays.asList(flowFile1, flowFile2), transaction.getAndPurgeFlowFilesSent());
     }
 
 
@@ -271,6 +271,6 @@ public class TestLoadBalanceSession {
 
         assertArrayEquals(expectedSent, dataSent);
 
-        assertEquals(Arrays.asList(flowFile1), transaction.getFlowFilesSent());
+        assertEquals(Arrays.asList(flowFile1), transaction.getAndPurgeFlowFilesSent());
     }
 }

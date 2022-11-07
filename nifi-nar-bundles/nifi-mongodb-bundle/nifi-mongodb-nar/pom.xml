@@ -41,5 +41,4 @@
             <artifactId>nifi-mongodb-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

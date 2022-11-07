@@ -25,36 +25,35 @@ import com.google.cloud.bigquery.JobId;
 import com.google.cloud.bigquery.JobInfo;
 import com.google.cloud.bigquery.JobStatistics;
 import com.google.cloud.bigquery.JobStatus;
-import com.google.cloud.bigquery.Table;
 import com.google.cloud.bigquery.TableDataWriteChannel;
 import com.google.cloud.bigquery.WriteChannelConfiguration;
+import org.apache.nifi.components.ConfigVerificationResult;
+import org.apache.nifi.processor.ProcessContext;
+import org.apache.nifi.processor.VerifiableProcessor;
 import org.apache.nifi.util.TestRunner;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 
-import static org.mockito.Mockito.reset;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link PutBigQueryBatch}.
  */
 public class PutBigQueryBatchTest extends AbstractBQTest {
-    private static final String TABLENAME = "test_table";
+    private static final String TABLE_NAME = "test_table";
     private static final String TABLE_SCHEMA = "[{ \"mode\": \"NULLABLE\", \"name\": \"data\", \"type\": \"STRING\" }]";
     private static final String SOURCE_TYPE = FormatOptions.json().getType();
     private static final String CREATE_DISPOSITION = JobInfo.CreateDisposition.CREATE_IF_NEEDED.name();
     private static final String WRITE_DISPOSITION = JobInfo.WriteDisposition.WRITE_EMPTY.name();
-    private static final String MAXBAD_RECORDS = "0";
+    private static final String MAX_BAD_RECORDS = "0";
     private static final String IGNORE_UNKNOWN = "true";
     private static final String READ_TIMEOUT = "5 minutes";
-
-    @Mock
-    BigQuery bq;
-
-    @Mock
-    Table table;
 
     @Mock
     Job job;
@@ -71,21 +70,16 @@ public class PutBigQueryBatchTest extends AbstractBQTest {
     @Mock
     TableDataWriteChannel tableDataWriteChannel;
 
-    @Before
-    public void setup() throws Exception {
-        super.setup();
-        reset(bq);
-        reset(table);
-        reset(job);
-        reset(jobStatus);
-        reset(stats);
-    }
-
     @Override
     public AbstractBigQueryProcessor getProcessor() {
         return new PutBigQueryBatch() {
             @Override
             protected BigQuery getCloudService() {
+                return bq;
+            }
+
+            @Override
+            protected BigQuery getCloudService(final ProcessContext context) {
                 return bq;
             }
         };
@@ -94,20 +88,18 @@ public class PutBigQueryBatchTest extends AbstractBQTest {
     @Override
     protected void addRequiredPropertiesToRunner(TestRunner runner) {
         runner.setProperty(PutBigQueryBatch.DATASET, DATASET);
-        runner.setProperty(PutBigQueryBatch.TABLE_NAME, TABLENAME);
+        runner.setProperty(PutBigQueryBatch.TABLE_NAME, TABLE_NAME);
         runner.setProperty(PutBigQueryBatch.TABLE_SCHEMA, TABLE_SCHEMA);
         runner.setProperty(PutBigQueryBatch.SOURCE_TYPE, SOURCE_TYPE);
         runner.setProperty(PutBigQueryBatch.CREATE_DISPOSITION, CREATE_DISPOSITION);
         runner.setProperty(PutBigQueryBatch.WRITE_DISPOSITION, WRITE_DISPOSITION);
-        runner.setProperty(PutBigQueryBatch.MAXBAD_RECORDS, MAXBAD_RECORDS);
+        runner.setProperty(PutBigQueryBatch.MAXBAD_RECORDS, MAX_BAD_RECORDS);
         runner.setProperty(PutBigQueryBatch.IGNORE_UNKNOWN, IGNORE_UNKNOWN);
         runner.setProperty(PutBigQueryBatch.READ_TIMEOUT, READ_TIMEOUT);
     }
 
     @Test
     public void testSuccessfulLoad() throws Exception {
-        when(table.exists()).thenReturn(Boolean.TRUE);
-        when(bq.create(ArgumentMatchers.isA(JobInfo.class))).thenReturn(job);
         when(bq.writer(ArgumentMatchers.isA(WriteChannelConfiguration.class))).thenReturn(tableDataWriteChannel);
         when(tableDataWriteChannel.getJob()).thenReturn(job);
         when(job.waitFor(ArgumentMatchers.isA(RetryOption.class))).thenReturn(job);
@@ -120,7 +112,8 @@ public class PutBigQueryBatchTest extends AbstractBQTest {
         when(job.getJobId()).thenReturn(jobId);
         when(jobId.getJob()).thenReturn("job-id");
 
-        final TestRunner runner = buildNewRunner(getProcessor());
+        final AbstractBigQueryProcessor processor = getProcessor();
+        final TestRunner runner = buildNewRunner(processor);
         addRequiredPropertiesToRunner(runner);
         runner.assertValid();
 
@@ -128,22 +121,19 @@ public class PutBigQueryBatchTest extends AbstractBQTest {
 
         runner.run();
 
+        when(bq.testIamPermissions(any(), any())).thenReturn(Collections.singletonList("permission"));
+        final List<ConfigVerificationResult> verificationResults = ((VerifiableProcessor) processor).verify(runner.getProcessContext(), runner.getLogger(), Collections.emptyMap());
+        assertEquals(2, verificationResults.size());
+        assertEquals(ConfigVerificationResult.Outcome.SUCCESSFUL, verificationResults.get(1).getOutcome());
+
         runner.assertAllFlowFilesTransferred(PutBigQueryBatch.REL_SUCCESS);
     }
 
     @Test
     public void testFailedLoad() throws Exception {
-        when(table.exists()).thenReturn(Boolean.TRUE);
-        when(bq.create(ArgumentMatchers.isA(JobInfo.class))).thenReturn(job);
         when(bq.writer(ArgumentMatchers.isA(WriteChannelConfiguration.class))).thenReturn(tableDataWriteChannel);
         when(tableDataWriteChannel.getJob()).thenReturn(job);
         when(job.waitFor(ArgumentMatchers.isA(RetryOption.class))).thenThrow(BigQueryException.class);
-        when(job.getStatus()).thenReturn(jobStatus);
-        when(job.getStatistics()).thenReturn(stats);
-
-        when(stats.getCreationTime()).thenReturn(0L);
-        when(stats.getStartTime()).thenReturn(1L);
-        when(stats.getEndTime()).thenReturn(2L);
 
         final TestRunner runner = buildNewRunner(getProcessor());
         addRequiredPropertiesToRunner(runner);

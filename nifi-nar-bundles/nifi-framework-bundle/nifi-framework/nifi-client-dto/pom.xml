@@ -26,9 +26,14 @@
             <groupId>io.swagger</groupId>
             <artifactId>swagger-annotations</artifactId>
         </dependency>
+                <dependency>
+                    <groupId>org.apache.nifi</groupId>
+                    <artifactId>nifi-api</artifactId>
+                    <version>1.18.0</version>
+                </dependency>
         <dependency>
-            <groupId>org.apache.nifi.registry</groupId>
-            <artifactId>nifi-registry-data-model</artifactId>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>c2-protocol-component-api</artifactId>
             <version>1.18.0</version>
         </dependency>
     </dependencies>

@@ -17,25 +17,9 @@
 
 package org.apache.nifi.processors.standard;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.context.PropertyContext;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
 import org.apache.nifi.processor.ProcessContext;
@@ -48,18 +32,33 @@ import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.MockProcessContext;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.mockito.stubbing.Answer;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 public class TestFetchFTP {
 
     private TestableFetchFTP proc;
     private TestRunner runner;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         proc = new TestableFetchFTP();
         runner = TestRunners.newTestRunner(proc);
@@ -106,19 +105,6 @@ public class TestFetchFTP {
         transferredFlowFile.assertContentEquals("world");
         transferredFlowFile.assertAttributeExists(CoreAttributes.PATH.key());
         transferredFlowFile.assertAttributeEquals(CoreAttributes.PATH.key(), "./here/is/my/path");
-    }
-
-    @Test
-    public void testControlEncodingIsSetToUTF8() {
-        runner.setProperty(FTPTransfer.UTF8_ENCODING, "true");
-
-        addFileAndEnqueue("őűőű.txt");
-
-        runner.run(1, false, false);
-
-        ArgumentCaptor<String> argument = ArgumentCaptor.forClass(String.class);
-        verify(proc.mockFtpClient).setControlEncoding(argument.capture());
-        assertEquals("utf-8", argument.getValue().toLowerCase());
     }
 
     @Test
@@ -297,7 +283,7 @@ public class TestFetchFTP {
             return new FTPTransfer(context, getLogger()) {
 
                 @Override
-                protected FTPClient createFTPClient() {
+                protected FTPClient createClient(final PropertyContext context, final Map<String, String> attributes) {
                     return mockFtpClient;
                 }
 

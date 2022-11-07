@@ -98,12 +98,12 @@ public class NiFiWebApiResourceConfig extends ResourceConfig {
         register(ctx.getBean("countersResource"));
         register(ctx.getBean("systemDiagnosticsResource"));
         register(ctx.getBean("accessResource"));
-        register(ctx.getBean("samlResource"));
         register(ctx.getBean("oidcResource"));
         register(ctx.getBean("accessPolicyResource"));
         register(ctx.getBean("tenantsResource"));
         register(ctx.getBean("versionsResource"));
         register(ctx.getBean("parameterContextResource"));
+        register(ctx.getBean("parameterProviderResource"));
 
         // exception mappers
         register(AccessDeniedExceptionMapper.class);

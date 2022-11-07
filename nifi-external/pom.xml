@@ -20,7 +20,6 @@
         <artifactId>nifi</artifactId>
         <version>1.18.0</version>
     </parent>
-    <groupId>org.apache.nifi</groupId>
     <artifactId>nifi-external</artifactId>
     <packaging>pom</packaging>
     <modules>

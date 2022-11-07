@@ -212,6 +212,43 @@
             }).size() > 0;
     };
 
+    var moveComponentToFront = function (selection, componentManager) {
+        var datum = selection.datum();
+
+        // determine the current max zIndex
+        var maxZIndex = -1;
+        $.each(componentManager['get'](), function (_, otherComponent) {
+            if (datum.id !== otherComponent.id && otherComponent.zIndex > maxZIndex) {
+                maxZIndex = otherComponent.zIndex;
+            }
+        });
+
+        // ensure the edge wasn't already in front
+        if (maxZIndex >= 0) {
+            var zIndex = maxZIndex + 1;
+
+            // build the connection entity
+            var componentEntity = {
+                'revision': nfClient.getRevision(datum),
+                'disconnectedNodeAcknowledged': nfStorage.isDisconnectionAcknowledged(),
+                'component': {
+                    'id': datum.id,
+                    'zIndex': zIndex
+                }
+            };
+
+            return $.ajax({
+                type: 'PUT',
+                url: datum.uri,
+                data: JSON.stringify(componentEntity),
+                dataType: 'json',
+                contentType: 'application/json'
+            }).done(function (response) {
+                componentManager['set'](response);
+            }).fail(nfErrorHandler.handleAjaxError);
+        }
+    }
+
     var nfActions = {
         /**
          * Initializes the actions.
@@ -639,6 +676,96 @@
             }
         },
 
+        replayLastProvenanceEvent: function(selection, nodes) {
+            if (selection.size() === 1) {
+                var selectionData = selection.datum();
+
+                // submit replay event
+                var entity = {
+                    'componentId': selectionData.id,
+                    'nodes': nodes
+                };
+
+                $.ajax({
+                    type: 'POST',
+                    url: config.urls.api + '/provenance-events/latest/replays',
+                    data: JSON.stringify(entity),
+                    dataType: 'json',
+                    contentType: 'application/json'
+                }).fail(function (xhr, status, error) {
+                    nfDialog.showOkDialog({
+                        headerText: 'Failed to Replay Event',
+                        dialogContent: nfCommon.escapeHtml(xhr.responseText)
+                    });
+                }).done(function (response) {
+                    if (nfCommon.isDefinedAndNotNull(response.aggregateSnapshot.failureExplanation)) {
+                        nfDialog.showOkDialog({
+                            headerText: 'Replay Event Failure',
+                            dialogContent: response.aggregateSnapshot.failureExplanation
+                        });
+                    } else if (response.aggregateSnapshot.eventAvailable !== true) {
+                        nfDialog.showOkDialog({
+                            headerText: 'No Event Available',
+                            dialogContent: 'There was no recent event available to be replayed.'
+                        });
+                    } else if (nfCommon.isDefinedAndNotNull(response.nodeSnapshots)) {
+                        var replayedCount = 0;
+                        var unavailableCount = 0;
+
+                        for (var i = 0; i < response.nodeSnapshots.length; i++) {
+                            var nodeResponse = response.nodeSnapshots[i];
+                            if (nodeResponse.snapshot.eventAvailable) {
+                                replayedCount++;
+                            } else {
+                                unavailableCount++;
+                            }
+                        }
+
+                        var messageText;
+                        if (unavailableCount === 0) {
+                            messageText = 'All nodes successfully replayed the latest event.';
+                        } else {
+                            messageText = replayedCount + ' nodes successfully replayed the latest event but ' + unavailableCount + ' had no recent event avaialble to be replayed.';
+                        }
+
+                        nfDialog.showOkDialog({
+                            headerText: 'Events Replayed',
+                            dialogContent: messageText
+                        });
+                    } else {
+                        nfDialog.showOkDialog({
+                            headerText: 'Event Replayed',
+                            dialogContent: 'Successfully replayed the latest event.'
+                        });
+                    }
+
+                    var componentConnections = nfConnection.getComponentConnections(selectionData.id);
+                    for (var i=0; i < componentConnections.length; i++) {
+                        var connection = componentConnections[i];
+                        nfConnection.reload(connection.id);
+                    }
+                });
+            }
+        },
+
+        /**
+         * Submits a request to replay the last provenance event on all nodes in the cluster.
+         *
+         * @argument {selection} selection The selection
+         */
+        replayLastAllNodes: function (selection) {
+            this.replayLastProvenanceEvent(selection, 'ALL');
+        },
+
+        /**
+         * Submits a request to replay the last provenance event on the primary node in the cluster.
+         *
+         * @argument {selection} selection The selection
+         */
+        replayLastPrimaryNode: function (selection) {
+            this.replayLastProvenanceEvent(selection, 'PRIMARY');
+        },
+
         /**
          * Starts the components in the specified selection.
          *
@@ -699,7 +826,7 @@
                             var remoteProcessGroupEntity = {
                                 'state': 'TRANSMITTING'
                             };
-                            var startRemoteProcessGroups = updateResource(config.urls.api + '/remote-process-groups/process-group/' + encodeURIComponent(nfCanvasUtils.getGroupId()) + '/run-status', remoteProcessGroupEntity);
+                            var startRemoteProcessGroups = updateResource(config.urls.api + '/remote-process-groups/process-group/' + encodeURIComponent(d.id) + '/run-status', remoteProcessGroupEntity);
                             startRequests.push(startRemoteProcessGroups.done(function (response) {}));
 
                             startRequests.push(updateResource(uri, entity).done(function (response) {
@@ -817,7 +944,7 @@
                             var remoteProcessGroupEntity = {
                                 'state': 'STOPPED'
                             };
-                            var stopRemoteProcessGroups = updateResource(config.urls.api + '/remote-process-groups/process-group/' + encodeURIComponent(nfCanvasUtils.getGroupId()) + '/run-status', remoteProcessGroupEntity);
+                            var stopRemoteProcessGroups = updateResource(config.urls.api + '/remote-process-groups/process-group/' + encodeURIComponent(d.id) + '/run-status', remoteProcessGroupEntity);
                             stopRequests.push(stopRemoteProcessGroups.done(function (response) {}));
 
                             stopRequests.push(updateResource(uri, entity).done(function (response) {
@@ -842,6 +969,56 @@
                          cb();
                     }
                 }
+            }
+        },
+
+        /**
+         * Enable all controller services in the specified ProcessGroup.
+         *
+         * @argument {selection} selection      The selection
+         */
+        enableAllControllerServices: function (selection) {
+            // get selected ProcessGroup id
+            var pg_id = selection.empty() ? nfCanvasUtils.getGroupId() : selection.datum().id;
+            // build URL
+            var url = config.urls.api + '/flow/process-groups/' + encodeURIComponent(pg_id) + '/controller-services';
+            // build the entity
+            var entity = {
+                'id': pg_id,
+                'state': 'ENABLED'
+            };
+
+            if (selection.empty()) {
+                updateResource(url, entity).done(updateProcessGroup);
+            } else {
+                updateResource(url, entity).done(function (response) {
+                    nfCanvasUtils.getComponentByType('ProcessGroup').reload(pg_id);
+                })
+            }
+        },
+
+        /**
+         * Disable all controller services in the specified ProcessGroup.
+         *
+         * @argument {selection} selection      The selection
+         */
+        disableAllControllerServices: function (selection) {
+            // get selected ProcessGroup id
+            var pg_id = selection.empty() ? nfCanvasUtils.getGroupId() : selection.datum().id;
+            // build URL
+            var url = config.urls.api + '/flow/process-groups/' + encodeURIComponent(pg_id) + '/controller-services';
+            // build the entity
+            var entity = {
+                'id': pg_id,
+                'state': 'DISABLED'
+            };
+
+            if (selection.empty()) {
+                updateResource(url, entity).done(updateProcessGroup);
+            } else {
+                updateResource(url, entity).done(function (response) {
+                    nfCanvasUtils.getComponentByType('ProcessGroup').reload(pg_id);
+                })
             }
         },
 
@@ -1632,9 +1809,23 @@
         },
 
         /**
+         * Downloads the current flow, without including the external Controller Services
+         */
+        downloadFlowWithoutExternalServices: function (selection) {
+            this.downloadFlow(selection, false);
+        },
+
+        /**
+         * Downloads the current flow, including the external Controller Services
+         */
+        downloadFlowWithExternalServices: function (selection) {
+            this.downloadFlow(selection, true);
+        },
+
+        /**
          * Downloads the current flow
          */
-        downloadFlow: function (selection) {
+        downloadFlow: function (selection,includeReferencedServices) {
             var processGroupId = null;
 
             if (selection.empty()) {
@@ -1650,7 +1841,7 @@
                 var parameters = {};
 
                 // open the url
-                var uri = '../nifi-api/process-groups/' + encodeURIComponent(processGroupId) + '/download';
+                var uri = '../nifi-api/process-groups/' + encodeURIComponent(processGroupId) + '/download?includeReferencedServices=' + includeReferencedServices;
                 window.open(uri);
             }
         },
@@ -2202,47 +2393,15 @@
          *
          * @param {selection} selection
          */
-        toFront: function (selection) {
-            if (selection.size() !== 1 || !nfCanvasUtils.isConnection(selection)) {
+         toFront: function (selection) {
+            if (selection.size() !== 1) {
                 return;
             }
 
-            // get the connection data
-            var connection = selection.datum();
-
-            // determine the current max zIndex
-            var maxZIndex = -1;
-            $.each(nfConnection.get(), function (_, otherConnection) {
-                if (connection.id !== otherConnection.id && otherConnection.zIndex > maxZIndex) {
-                    maxZIndex = otherConnection.zIndex;
-                }
-            });
-
-            // ensure the edge wasn't already in front
-            if (maxZIndex >= 0) {
-                // use one higher
-                var zIndex = maxZIndex + 1;
-
-                // build the connection entity
-                var connectionEntity = {
-                    'revision': nfClient.getRevision(connection),
-                    'disconnectedNodeAcknowledged': nfStorage.isDisconnectionAcknowledged(),
-                    'component': {
-                        'id': connection.id,
-                        'zIndex': zIndex
-                    }
-                };
-
-                // update the edge in question
-                $.ajax({
-                    type: 'PUT',
-                    url: connection.uri,
-                    data: JSON.stringify(connectionEntity),
-                    dataType: 'json',
-                    contentType: 'application/json'
-                }).done(function (response) {
-                    nfConnection.set(response);
-                }).fail(nfErrorHandler.handleAjaxError);
+            if (nfCanvasUtils.isConnection(selection)) {
+                moveComponentToFront(selection, nfConnection);
+            } else if (nfCanvasUtils.isLabel(selection)) {
+                moveComponentToFront(selection, nfLabel);
             }
         }
     };

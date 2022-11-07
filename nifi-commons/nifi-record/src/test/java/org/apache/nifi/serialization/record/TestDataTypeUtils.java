@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -43,11 +44,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.DoubleAdder;
 import java.util.function.Function;
@@ -91,6 +94,12 @@ public class TestDataTypeUtils {
         assertEquals(ts.getTime(), sDate.getTime(), "Times didn't match");
     }
 
+    @Test
+    public void testIntDoubleWiderType() {
+        assertEquals(Optional.of(RecordFieldType.DOUBLE.getDataType()), DataTypeUtils.getWiderType(RecordFieldType.INT.getDataType(), RecordFieldType.DOUBLE.getDataType()));
+        assertEquals(Optional.of(RecordFieldType.DOUBLE.getDataType()), DataTypeUtils.getWiderType(RecordFieldType.DOUBLE.getDataType(), RecordFieldType.INT.getDataType()));
+    }
+
     /*
      * This was a bug in NiFi 1.8 where converting from a Timestamp to a Date with the record path API
      * would throw an exception.
@@ -130,6 +139,57 @@ public class TestDataTypeUtils {
         assertTrue(resultMap.get("field3") instanceof int[]);
         assertNull(resultMap.get("field4"));
 
+    }
+
+    @Test
+    public void testUUIDStringToUUIDObject() {
+        UUID generated = UUID.randomUUID();
+        String uuidString = generated.toString();
+
+        Object result = DataTypeUtils.convertType(uuidString, RecordFieldType.UUID.getDataType(), "uuid_test");
+        assertTrue(result instanceof UUID);
+        assertEquals(generated, result);
+    }
+
+    @Test
+    public void testUUIDObjectToUUIDString() {
+        UUID generated = UUID.randomUUID();
+        String uuid = generated.toString();
+
+        Object result = DataTypeUtils.convertType(generated, RecordFieldType.STRING.getDataType(), "uuid_test");
+        assertTrue(result instanceof String);
+        assertEquals(uuid, result);
+    }
+
+    @Test
+    public void testUUIDToByteArray() {
+        UUID generated = UUID.randomUUID();
+        ByteBuffer buffer = ByteBuffer.allocate(16);
+        buffer.putLong(generated.getMostSignificantBits());
+        buffer.putLong(generated.getLeastSignificantBits());
+        byte[] expected = buffer.array();
+
+        Object result = DataTypeUtils.convertType(expected, RecordFieldType.UUID.getDataType(), "uuid_test");
+        assertTrue(result instanceof UUID);
+        assertEquals(generated, result);
+    }
+
+    @Test
+    public void testByteArrayToUUID() {
+        UUID generated = UUID.randomUUID();
+        ByteBuffer buffer = ByteBuffer.allocate(16);
+        buffer.putLong(generated.getMostSignificantBits());
+        buffer.putLong(generated.getLeastSignificantBits());
+        byte[] expected = buffer.array();
+
+        Object result = DataTypeUtils.convertType(expected, RecordFieldType.ARRAY.getDataType(), "uuid_test");
+        assertTrue(result instanceof Byte[]);
+        assertEquals( 16, ((Byte[]) result).length);
+        Byte[] bytes = (Byte[])result;
+        for (int x = 0; x < bytes.length; x++) {
+            byte current = bytes[x];
+            assertEquals(expected[x], current);
+        }
     }
 
     @Test
@@ -611,7 +671,7 @@ public class TestDataTypeUtils {
 
     @Test
     public void testInferTypeWithMapStringKeys() {
-        Map<String, String> map = new HashMap<>();
+        Map<String, String> map = new LinkedHashMap<>();
         map.put("a", "Hello");
         map.put("b", "World");
 
@@ -626,7 +686,7 @@ public class TestDataTypeUtils {
 
     @Test
     public void testInferTypeWithMapNonStringKeys() {
-        Map<Integer, String> map = new HashMap<>();
+        Map<Integer, String> map = new LinkedHashMap<>();
         map.put(1, "Hello");
         map.put(2, "World");
 

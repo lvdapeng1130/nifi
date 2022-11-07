@@ -29,12 +29,17 @@ public enum ComponentType {
     REMOTE_OUTPUT_PORT("Remote Output Port"),
     FUNNEL("Funnel"),
     LABEL("Label"),
-    CONTROLLER_SERVICE("Controller Service");
+    CONTROLLER_SERVICE("Controller Service"),
+    REPORTING_TASK("Reporting Task"),
+    PARAMETER_CONTEXT("Parameter Context"),
+    PARAMETER_PROVIDER("Parameter Provider"),
+    TEMPLATE("Template"),
+    FLOW_REGISTRY_CLIENT("Flow Registry Client");
 
 
     private final String typeName;
 
-    private ComponentType(final String typeName) {
+    ComponentType(final String typeName) {
         this.typeName = typeName;
     }
 

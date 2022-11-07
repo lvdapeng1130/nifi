@@ -24,6 +24,8 @@ import org.apache.nifi.components.Validator;
 import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.processor.util.StandardValidators;
+import org.apache.nifi.proxy.ProxyConfiguration;
+import org.apache.nifi.proxy.ProxySpec;
 import org.apache.nifi.ssl.SSLContextService;
 
 import java.util.List;
@@ -49,6 +51,7 @@ public interface ElasticSearchClientService extends ControllerService {
             .identifiesControllerService(SSLContextService.class)
             .addValidator(Validator.VALID)
             .build();
+    PropertyDescriptor PROXY_CONFIGURATION_SERVICE = ProxyConfiguration.createProxyConfigPropertyDescriptor(false, ProxySpec.HTTP);
     PropertyDescriptor USERNAME = new PropertyDescriptor.Builder()
             .name("el-cs-username")
             .displayName("Username")
@@ -191,6 +194,14 @@ public interface ElasticSearchClientService extends ControllerService {
      * @return An UpdateOperationResponse object if successful.
      */
     UpdateOperationResponse updateByQuery(String query, String index, String type, Map<String, String> requestParameters);
+
+    /**
+     * Refresh index/indices.
+     *
+     * @param index The index to target, if omitted then all indices will be updated.
+     * @param requestParameters A collection of URL request parameters. Optional.
+     */
+    void refresh(final String index, final Map<String, String> requestParameters);
 
     /**
      * Get a document by ID.

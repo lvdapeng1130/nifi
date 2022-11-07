@@ -30,5 +30,4 @@
         <module>nifi-tcp-processors</module>
         <module>nifi-tcp-nar</module>
     </modules>
-
 </project>

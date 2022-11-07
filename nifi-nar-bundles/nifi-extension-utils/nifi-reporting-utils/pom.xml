@@ -22,7 +22,6 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>nifi-reporting-utils</artifactId>
-    <version>1.18.0</version>
     <packaging>jar</packaging>
 
     <dependencies>
@@ -36,11 +35,6 @@
             <version>1.18.0</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-lang3</artifactId>
-            <version>3.9</version>
-        </dependency>
-        <dependency>
             <groupId>org.glassfish</groupId>
             <artifactId>javax.json</artifactId>
             <version>1.0.4</version>
@@ -52,5 +46,4 @@
             <scope>compile</scope>
         </dependency>
     </dependencies>
-
 </project>

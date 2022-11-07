@@ -27,6 +27,4 @@
         <module>nifi-proxy-configuration</module>
         <module>nifi-proxy-configuration-nar</module>
     </modules>
-
-
 </project>

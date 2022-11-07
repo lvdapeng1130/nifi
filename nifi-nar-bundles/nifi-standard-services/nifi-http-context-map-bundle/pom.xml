@@ -27,5 +27,4 @@
         <module>nifi-http-context-map</module>
         <module>nifi-http-context-map-nar</module>
     </modules>
-    
 </project>

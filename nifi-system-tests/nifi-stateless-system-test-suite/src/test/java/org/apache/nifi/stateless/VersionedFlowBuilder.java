@@ -29,7 +29,7 @@ import org.apache.nifi.flow.VersionedComponent;
 import org.apache.nifi.flow.VersionedConnection;
 import org.apache.nifi.flow.VersionedControllerService;
 import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
-import org.apache.nifi.registry.flow.VersionedParameterContext;
+import org.apache.nifi.flow.VersionedParameterContext;
 import org.apache.nifi.flow.VersionedPort;
 import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flow.VersionedProcessor;
@@ -43,8 +43,8 @@ import java.util.Set;
 import java.util.UUID;
 
 public class VersionedFlowBuilder {
-    private VersionedFlowSnapshot flowSnapshot;
-    private VersionedProcessGroup rootGroup;
+    private final VersionedFlowSnapshot flowSnapshot;
+    private final VersionedProcessGroup rootGroup;
 
     public VersionedFlowBuilder() {
          rootGroup = new VersionedProcessGroup();
@@ -80,7 +80,7 @@ public class VersionedFlowBuilder {
 
     public VersionedPort createOutputPort(final String portName, final VersionedProcessGroup group) {
         final VersionedPort port = new VersionedPort();
-        port.setAllowRemoteAccess(false);
+        port.setAllowRemoteAccess(Boolean.FALSE);
         port.setComponentType(ComponentType.OUTPUT_PORT);
         port.setConcurrentlySchedulableTaskCount(1);
         port.setGroupIdentifier(group.getIdentifier());
@@ -100,7 +100,7 @@ public class VersionedFlowBuilder {
 
     public VersionedPort createInputPort(final String portName, final VersionedProcessGroup group) {
         final VersionedPort port = new VersionedPort();
-        port.setAllowRemoteAccess(false);
+        port.setAllowRemoteAccess(Boolean.FALSE);
         port.setComponentType(ComponentType.INPUT_PORT);
         port.setConcurrentlySchedulableTaskCount(1);
         port.setGroupIdentifier(group.getIdentifier());
@@ -144,6 +144,10 @@ public class VersionedFlowBuilder {
         processor.setType(type);
         processor.setYieldDuration("1 sec");
         processor.setSchedulingStrategy("TIMER_DRIVEN");
+        processor.setRetryCount(0);
+        processor.setBackoffMechanism("PENALIZE_FLOWFILE");
+        processor.setRetriedRelationships(Collections.emptySet());
+        processor.setMaxBackoffPeriod("0 sec");
 
         group.getProcessors().add(processor);
         return processor;
@@ -222,6 +226,7 @@ public class VersionedFlowBuilder {
         service.setGroupIdentifier(group.getIdentifier());
         service.setIdentifier(UUID.randomUUID().toString());
         service.setName(type);
+        service.setBulletinLevel("WARN");
         service.setPosition(new Position(0, 0));
         service.setProperties(new HashMap<>());
         service.setPropertyDescriptors(new HashMap<>());

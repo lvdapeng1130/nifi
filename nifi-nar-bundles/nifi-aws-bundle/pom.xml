@@ -26,23 +26,9 @@
     <packaging>pom</packaging>
 
     <properties>
-        <!-- keep AWS 1.x until NIFI-8287 -->
-        <aws-java-sdk-version>1.11.1016</aws-java-sdk-version>
-        <!-- Do not upgrade to 1.14.x+ until https://github.com/awslabs/amazon-kinesis-client/issues/796 is fixed -->
-        <aws-kinesis-client-library-version>1.13.3</aws-kinesis-client-library-version>
+        <!-- keep KCL 1.x until NIFI-8531 (blocked by NIFI-8287) -->
+        <aws-kinesis-client-library-version>1.14.8</aws-kinesis-client-library-version>
     </properties>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>com.amazonaws</groupId>
-                <artifactId>aws-java-sdk-bom</artifactId>
-                <version>${aws-java-sdk-version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <modules>
         <module>nifi-aws-processors</module>
@@ -51,6 +37,6 @@
         <module>nifi-aws-service-api-nar</module>
         <module>nifi-aws-abstract-processors</module>
         <module>nifi-aws-parameter-value-providers</module>
+        <module>nifi-aws-parameter-providers</module>
     </modules>
-
 </project>

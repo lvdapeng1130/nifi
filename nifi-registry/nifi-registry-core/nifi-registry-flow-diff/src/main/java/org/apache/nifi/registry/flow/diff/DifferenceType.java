@@ -54,6 +54,26 @@ public enum DifferenceType {
     YIELD_DURATION_CHANGED("Yield Duration Changed"),
 
     /**
+     * The component has a different retry count in each of the flows
+     */
+    RETRY_COUNT_CHANGED("Retry Count Changed"),
+
+    /**
+     * The component has a different retried relationship in each of the flows
+     */
+    RETRIED_RELATIONSHIPS_CHANGED("Retried Relationships Changed"),
+
+    /**
+     * The component has a different backoff mechanism in each of the flows
+     */
+    BACKOFF_MECHANISM_CHANGED("Backoff Mechanism Changed"),
+
+    /**
+     * The component has a different max backoff period in each of the flows
+     */
+    MAX_BACKOFF_PERIOD_CHANGED("Max Backoff Period Changed"),
+
+    /**
      * The component has a different bulletin level in each of the flows
      */
     BULLETIN_LEVEL_CHANGED("Bulletin Level Changed"),
@@ -109,6 +129,11 @@ public enum DifferenceType {
     PROPERTY_REMOVED("Property Removed"),
 
     /**
+     * The sensitive status of the property changed
+     */
+    PROPERTY_SENSITIVITY_CHANGED("Property Sensitivity Changed"),
+
+    /**
      * Property is unset or set to an explicit value in Flow A but set to (exactly) a parameter reference in Flow B. Note that if Flow A
      * has a property set to "#{param1} abc" and it is changed to "#{param1} abc #{param2}" this would indicate a Difference Type of @{link #PROPERTY_CHANGED}, not
      * PROPERTY_PARAMETERIZED
@@ -121,6 +146,46 @@ public enum DifferenceType {
     PROPERTY_PARAMETERIZATION_REMOVED("Property Parameterization Removed"),
 
     /**
+     * Parameter exists for a given Parameter Context in Flow B but does not exist in Flow A
+     */
+    PARAMETER_ADDED("Parameter Added"),
+
+    /**
+     * Parameter exists for a given Parameter Context in Flow A but does not exist in Flow B
+     */
+    PARAMETER_REMOVED("Parameter Removed"),
+
+    /**
+     * The value of the Parameter is different in each of the flows
+     */
+    PARAMETER_VALUE_CHANGED("Parameter Value Changed"),
+
+    /**
+     * The description of the Parameter is different in each of the flows
+     */
+    PARAMETER_DESCRIPTION_CHANGED("Parameter Description Changed"),
+
+    /**
+     * The Parameter Context bound to a Process Group is different in each of the flows
+     */
+    PARAMETER_CONTEXT_CHANGED("Parameter Context Changed"),
+
+    /**
+     * The Parameter Context inherits from a different collection of Parameter Contexts in each of the flows
+     */
+    INHERITED_CONTEXTS_CHANGED("Inherited Parameter Contexts Changed"),
+
+    /**
+     * The Parameter Context references a different Parameter Group Name from a Parameter Provider in each of the flows
+     */
+    PARAMETER_GROUP_NAME_CHANGED("Mapped Parameter Group Name Changed"),
+
+    /**
+     * The Parameter Context synchronization to fetched Parameter Groups is different in each of the flows
+     */
+    PARAMETER_PROVIDER_SYNCHRONIZED_CHANGED("Parameter Context Synchronization Changed"),
+
+    /**
      * The component has a different value for the Annotation Data in each of the flows
      */
     ANNOTATION_DATA_CHANGED("Annotation Data (Advanced UI Configuration) Changed"),
@@ -129,6 +194,11 @@ public enum DifferenceType {
      * The component has a different comment in each of the flows
      */
     COMMENTS_CHANGED("Comments Changed"),
+
+    /**
+     * The component has a different description in each of the flows
+     */
+    DESCRIPTION_CHANGED("Description Changed"),
 
     /**
      * The position of the component on the graph is different in each of the flows
@@ -201,6 +271,11 @@ public enum DifferenceType {
     LABEL_VALUE_CHANGED("Label Text Changed"),
 
     /**
+     * The zindex value is different in each of the components
+     */
+    ZINDEX_CHANGED("z-index Changed"),
+
+    /**
      * The variable does not exist in Flow A but exists in Flow B
      */
     VARIABLE_ADDED("Variable Added to Process Group"),
@@ -209,6 +284,11 @@ public enum DifferenceType {
      * The variable does not exist in Flow B but exists in Flow A
      */
     VARIABLE_REMOVED("Variable Removed from Process Group"),
+
+    /**
+     * THe value of the variable is different in each of the flows
+     */
+    VARIABLE_CHANGED("Value of Variable was changed"),
 
     /**
      * The API of the Controller Service is different in each of the flows
@@ -244,6 +324,11 @@ public enum DifferenceType {
      * The Remote Process Group has a different Communications Timeout in each of the flows
      */
     RPG_COMMS_TIMEOUT_CHANGED("Remote Process Group Communications Timeout Changed"),
+
+    /**
+     * The Remote Process Group has a different URL in each of the flows
+     */
+    RPG_URL_CHANGED("Remote Process Group URL Changed"),
 
     /**
      * The Remote Input Port or Remote Output Port has a different Batch Size in each of the flows

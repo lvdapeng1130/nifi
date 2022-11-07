@@ -21,6 +21,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.NiFiClientException;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.ReportingTasksClient;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.RequestConfig;
+import org.apache.nifi.web.api.dto.RevisionDTO;
+import org.apache.nifi.web.api.entity.PropertyDescriptorEntity;
 import org.apache.nifi.web.api.entity.ReportingTaskEntity;
 import org.apache.nifi.web.api.entity.ReportingTaskRunStatusEntity;
 import org.apache.nifi.web.api.entity.VerifyConfigRequestEntity;
@@ -29,6 +31,7 @@ import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.MediaType;
 import java.io.IOException;
+import java.util.Objects;
 
 /**
  * Jersey implementation of ReportingTasksClient.
@@ -151,6 +154,50 @@ public class JerseyReportingTasksClient extends AbstractJerseyClient implements 
                 .resolveTemplate("requestId", verificationRequestId);
 
             return getRequestBuilder(target).delete(VerifyConfigRequestEntity.class);
+        });
+    }
+
+    @Override
+    public ReportingTaskEntity deleteReportingTask(final ReportingTaskEntity reportingTask) throws NiFiClientException, IOException {
+        if (reportingTask == null) {
+            throw new IllegalArgumentException("Reporting Task Entity cannot be null");
+        }
+        if (reportingTask.getId() == null) {
+            throw new IllegalArgumentException("Reporting Task ID cannot be null");
+        }
+
+        final RevisionDTO revision = reportingTask.getRevision();
+        if (revision == null) {
+            throw new IllegalArgumentException("Revision cannot be null");
+        }
+
+        return executeAction("Error deleting Reporting Task", () -> {
+            WebTarget target = reportingTasksTarget
+                .path("{id}").resolveTemplate("id", reportingTask.getId())
+                .queryParam("version", revision.getVersion())
+                .queryParam("clientId", revision.getClientId());
+
+            if (reportingTask.isDisconnectedNodeAcknowledged() == Boolean.TRUE) {
+                target = target.queryParam("disconnectedNodeAcknowledged", "true");
+            }
+
+            return getRequestBuilder(target).delete(ReportingTaskEntity.class);
+        });
+    }
+
+    @Override
+    public PropertyDescriptorEntity getPropertyDescriptor(final String componentId, final String propertyName, final Boolean sensitive) throws NiFiClientException, IOException {
+        Objects.requireNonNull(componentId, "Component ID required");
+        Objects.requireNonNull(propertyName, "Property Name required");
+
+        return executeAction("Error retrieving Property Descriptor", () -> {
+            final WebTarget target = reportingTasksTarget
+                    .path("{id}/descriptors")
+                    .resolveTemplate("id", componentId)
+                    .queryParam("propertyName", propertyName)
+                    .queryParam("sensitive", sensitive);
+
+            return getRequestBuilder(target).get(PropertyDescriptorEntity.class);
         });
     }
 }

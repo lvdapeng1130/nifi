@@ -33,12 +33,14 @@ import org.apache.nifi.controller.service.ControllerServiceState;
 import org.apache.nifi.controller.service.StandardConfigurationContext;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.logging.ComponentLog;
+import org.apache.nifi.logging.LogLevel;
 import org.apache.nifi.logging.LogRepository;
 import org.apache.nifi.logging.repository.NopLogRepository;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.parameter.ParameterLookup;
 import org.apache.nifi.components.ConfigVerificationResult;
 import org.apache.nifi.processor.SimpleProcessLogger;
+import org.apache.nifi.registry.VariableRegistry;
 import org.apache.nifi.util.BundleUtils;
 import org.apache.nifi.web.NiFiCoreException;
 import org.apache.nifi.web.ResourceNotFoundException;
@@ -92,7 +94,7 @@ public class StandardControllerServiceDAO extends ComponentDAO implements Contro
             final FlowManager flowManager = flowController.getFlowManager();
             final BundleCoordinate bundleCoordinate = BundleUtils.getBundle(extensionManager, controllerServiceDTO.getType(), controllerServiceDTO.getBundle());
             final ControllerServiceNode controllerService = flowManager.createControllerService(controllerServiceDTO.getType(), controllerServiceDTO.getId(), bundleCoordinate,
-                Collections.emptySet(), true, true);
+                Collections.emptySet(), true, true, null);
 
             // ensure we can perform the update
             verifyUpdate(controllerService, controllerServiceDTO);
@@ -243,7 +245,7 @@ public class StandardControllerServiceDAO extends ComponentDAO implements Contro
             if (ScheduledState.RUNNING.equals(scheduledState)) {
                 return serviceProvider.scheduleReferencingComponents(controllerService);
             } else {
-                return serviceProvider.unscheduleReferencingComponents(controllerService);
+                return serviceProvider.unscheduleReferencingComponents(controllerService).keySet();
             }
         }
 
@@ -326,7 +328,8 @@ public class StandardControllerServiceDAO extends ComponentDAO implements Contro
                 controllerServiceDTO.getAnnotationData(),
                 controllerServiceDTO.getComments(),
                 controllerServiceDTO.getProperties(),
-                controllerServiceDTO.getBundle())) {
+                controllerServiceDTO.getBundle(),
+                controllerServiceDTO.getBulletinLevel())) {
             modificationRequest = true;
 
             // validate the request
@@ -356,6 +359,7 @@ public class StandardControllerServiceDAO extends ComponentDAO implements Contro
         final String annotationData = controllerServiceDTO.getAnnotationData();
         final String comments = controllerServiceDTO.getComments();
         final Map<String, String> properties = controllerServiceDTO.getProperties();
+        final String bulletinLevel = controllerServiceDTO.getBulletinLevel();
 
         controllerService.pauseValidationTrigger(); // avoid causing validation to be triggered multiple times
         try {
@@ -369,7 +373,11 @@ public class StandardControllerServiceDAO extends ComponentDAO implements Contro
                 controllerService.setComments(comments);
             }
             if (isNotNull(properties)) {
-                controllerService.setProperties(properties);
+                final Set<String> sensitiveDynamicPropertyNames = controllerServiceDTO.getSensitiveDynamicPropertyNames();
+                controllerService.setProperties(properties, false, sensitiveDynamicPropertyNames == null ? Collections.emptySet() : sensitiveDynamicPropertyNames);
+            }
+            if (isNotNull(bulletinLevel)) {
+                controllerService.setBulletinLevel(LogLevel.valueOf(bulletinLevel));
             }
         } finally {
             controllerService.resumeValidationTrigger();
@@ -409,8 +417,9 @@ public class StandardControllerServiceDAO extends ComponentDAO implements Contro
         final ExtensionManager extensionManager = flowController.getExtensionManager();
 
         final ParameterLookup parameterLookup = serviceNode.getProcessGroup() == null ? ParameterLookup.EMPTY : serviceNode.getProcessGroup().getParameterContext();
+        final VariableRegistry variableRegistry = serviceNode.getProcessGroup() == null ? VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY : serviceNode.getProcessGroup().getVariableRegistry();
         final ConfigurationContext configurationContext = new StandardConfigurationContext(serviceNode, properties, serviceNode.getAnnotationData(),
-            parameterLookup, flowController.getControllerServiceProvider(), null, flowController.getVariableRegistry());
+            parameterLookup, flowController.getControllerServiceProvider(), null, variableRegistry);
 
         final List<ConfigVerificationResult> verificationResults = serviceNode.verifyConfiguration(configurationContext, configVerificationLog, variables, extensionManager);
         final List<ConfigVerificationResultDTO> resultsDtos = verificationResults.stream()

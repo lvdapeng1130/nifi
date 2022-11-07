@@ -15,20 +15,13 @@
  * limitations under the License.
  */
 package org.apache.nifi.processors.standard.db.impl;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
 
-/**
- * A generic database adapter that generates MySQL compatible SQL.
- */
-import com.google.common.base.Preconditions;
 import org.apache.nifi.util.StringUtils;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
+
 public class PostgreSQLDatabaseAdapter extends GenericDatabaseAdapter {
     @Override
     public String getName() {
@@ -41,28 +34,6 @@ public class PostgreSQLDatabaseAdapter extends GenericDatabaseAdapter {
     }
 
     @Override
-    public String unwrapIdentifier(String identifier) {
-        // Removes double quotes and back-ticks.
-        return identifier == null ? null : identifier.replaceAll("[\"`]", "");
-    }
-
-    @Override
-    public Statement getStatement(Connection con) throws SQLException {
-        return con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.FETCH_FORWARD);
-    }
-
-    @Override
-    public void setFetchSize(Connection con,final Statement statement,Integer fetchSize) throws SQLException {
-        if (fetchSize != null && fetchSize > 0) {
-            this.setAutoCommit(con,false);
-            statement.setFetchSize(fetchSize);
-        }
-    }
-
-    @Override
-    public void setAutoCommit(Connection con, boolean autoCommit) throws SQLException {
-        con.setAutoCommit(autoCommit);
-	}
     public boolean supportsUpsert() {
         return true;
     }
@@ -74,9 +45,15 @@ public class PostgreSQLDatabaseAdapter extends GenericDatabaseAdapter {
 
     @Override
     public String getUpsertStatement(String table, List<String> columnNames, Collection<String> uniqueKeyColumnNames) {
-        Preconditions.checkArgument(!StringUtils.isEmpty(table), "Table name cannot be null or blank");
-        Preconditions.checkArgument(columnNames != null && !columnNames.isEmpty(), "Column names cannot be null or empty");
-        Preconditions.checkArgument(uniqueKeyColumnNames != null && !uniqueKeyColumnNames.isEmpty(), "Key column names cannot be null or empty");
+        if (StringUtils.isEmpty(table)) {
+            throw new IllegalArgumentException("Table name cannot be null or blank");
+        }
+        if (columnNames == null || columnNames.isEmpty()) {
+            throw new IllegalArgumentException("Column names cannot be null or empty");
+        }
+        if (uniqueKeyColumnNames == null || uniqueKeyColumnNames.isEmpty()) {
+            throw new IllegalArgumentException("Key column names cannot be null or empty");
+        }
 
         String columns = columnNames.stream()
             .collect(Collectors.joining(", "));
@@ -108,9 +85,15 @@ public class PostgreSQLDatabaseAdapter extends GenericDatabaseAdapter {
 
     @Override
     public String getInsertIgnoreStatement(String table, List<String> columnNames, Collection<String> uniqueKeyColumnNames) {
-        Preconditions.checkArgument(!StringUtils.isEmpty(table), "Table name cannot be null or blank");
-        Preconditions.checkArgument(columnNames != null && !columnNames.isEmpty(), "Column names cannot be null or empty");
-        Preconditions.checkArgument(uniqueKeyColumnNames != null && !uniqueKeyColumnNames.isEmpty(), "Key column names cannot be null or empty");
+        if (StringUtils.isEmpty(table)) {
+            throw new IllegalArgumentException("Table name cannot be null or blank");
+        }
+        if (columnNames == null || columnNames.isEmpty()) {
+            throw new IllegalArgumentException("Column names cannot be null or empty");
+        }
+        if (uniqueKeyColumnNames == null || uniqueKeyColumnNames.isEmpty()) {
+            throw new IllegalArgumentException("Key column names cannot be null or empty");
+        }
 
         String columns = columnNames.stream()
                 .collect(Collectors.joining(", "));

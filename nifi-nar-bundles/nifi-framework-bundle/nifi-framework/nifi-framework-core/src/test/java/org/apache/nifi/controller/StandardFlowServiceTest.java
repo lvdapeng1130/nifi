@@ -30,7 +30,6 @@ import org.apache.nifi.events.VolatileBulletinRepository;
 import org.apache.nifi.nar.ExtensionDiscoveringManager;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.registry.VariableRegistry;
-import org.apache.nifi.registry.flow.FlowRegistryClient;
 import org.apache.nifi.registry.variable.FileBasedVariableRegistry;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.web.api.dto.ConnectableDTO;
@@ -93,8 +92,9 @@ public class StandardFlowServiceTest {
         revisionManager = mock(RevisionManager.class);
         extensionManager = mock(ExtensionDiscoveringManager.class);
         flowController = FlowController.createStandaloneInstance(mockFlowFileEventRepository, properties, authorizer, mockAuditService, mockEncryptor,
-                                        new VolatileBulletinRepository(), variableRegistry, mock(FlowRegistryClient.class), extensionManager, statusHistoryRepository);
-        flowService = StandardFlowService.createStandaloneInstance(flowController, properties, mockEncryptor, revisionManager, authorizer);
+                                        new VolatileBulletinRepository(), variableRegistry, extensionManager, statusHistoryRepository);
+        flowService = StandardFlowService.createStandaloneInstance(flowController, properties, revisionManager, authorizer,
+                FlowSerializationStrategy.WRITE_XML_AND_JSON);
         statusHistoryRepository = mock(StatusHistoryRepository.class);
     }
 
@@ -103,7 +103,7 @@ public class StandardFlowServiceTest {
         byte[] flowBytes = IOUtils.toByteArray(StandardFlowServiceTest.class.getResourceAsStream("/conf/all-flow.xml"));
         flowService.load(new StandardDataFlow(flowBytes, null, null, new HashSet<>()));
 
-        StandardFlowSerializer serializer = new StandardFlowSerializer(mockEncryptor);
+        StandardFlowSerializer serializer = new StandardFlowSerializer();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         final Document doc = serializer.transform(flowController, ScheduledStateLookup.IDENTITY_LOOKUP);
         serializer.serialize(doc, baos);
@@ -128,7 +128,7 @@ public class StandardFlowServiceTest {
         flowBytes = IOUtils.toByteArray(StandardFlowServiceTest.class.getResourceAsStream("/conf/all-flow-inheritable.xml"));
         flowService.load(new StandardDataFlow(flowBytes, null, null, new HashSet<>()));
 
-        StandardFlowSerializer serializer = new StandardFlowSerializer(mockEncryptor);
+        StandardFlowSerializer serializer = new StandardFlowSerializer();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         final Document doc = serializer.transform(flowController, ScheduledStateLookup.IDENTITY_LOOKUP);
         serializer.serialize(doc, baos);
@@ -148,8 +148,7 @@ public class StandardFlowServiceTest {
             flowService.load(new StandardDataFlow(updatedBytes, null, null, new HashSet<>()));
             fail("should have thrown " + UninheritableFlowException.class);
         } catch (UninheritableFlowException ufe) {
-
-            StandardFlowSerializer serializer = new StandardFlowSerializer(mockEncryptor);
+            StandardFlowSerializer serializer = new StandardFlowSerializer();
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             final Document doc = serializer.transform(flowController, ScheduledStateLookup.IDENTITY_LOOKUP);
             serializer.serialize(doc, baos);
@@ -171,8 +170,7 @@ public class StandardFlowServiceTest {
             flowService.load(new StandardDataFlow(updatedBytes, null, null, new HashSet<>()));
             fail("should have thrown " + FlowSerializationException.class);
         } catch (FlowSerializationException ufe) {
-
-            StandardFlowSerializer serializer = new StandardFlowSerializer(mockEncryptor);
+            StandardFlowSerializer serializer = new StandardFlowSerializer();
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             final Document doc = serializer.transform(flowController, ScheduledStateLookup.IDENTITY_LOOKUP);
             serializer.serialize(doc, baos);

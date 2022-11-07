@@ -108,15 +108,16 @@ public class PublishKafkaRecord_2_6 extends AbstractProcessor implements Verifia
             + "whether or not it is replicated. This is faster than <Guarantee Replicated Delivery> "
             + "but can result in data loss if a Kafka node crashes");
     static final AllowableValue DELIVERY_BEST_EFFORT = new AllowableValue("0", "Best Effort",
-        "FlowFile will be routed to success after successfully writing the content to a Kafka node, "
-            + "without waiting for a response. This provides the best performance but may result in data loss.");
+        "FlowFile will be routed to success after successfully sending the content to a Kafka node, "
+            + "without waiting for any acknowledgment from the node at all. This provides the best performance but may result in data loss.");
 
     static final AllowableValue ROUND_ROBIN_PARTITIONING = new AllowableValue(Partitioners.RoundRobinPartitioner.class.getName(),
         Partitioners.RoundRobinPartitioner.class.getSimpleName(),
         "Messages will be assigned partitions in a round-robin fashion, sending the first message to Partition 1, "
             + "the next Partition to Partition 2, and so on, wrapping as necessary.");
     static final AllowableValue RANDOM_PARTITIONING = new AllowableValue("org.apache.kafka.clients.producer.internals.DefaultPartitioner",
-        "DefaultPartitioner", "Messages will be assigned to random partitions.");
+        "DefaultPartitioner", "The default partitioning strategy will choose the sticky partition that changes when the batch is full "
+                + "(See KIP-480 for details about sticky partitioning).");
     static final AllowableValue RECORD_PATH_PARTITIONING = new AllowableValue(Partitioners.RecordPathPartitioner.class.getName(),
         "RecordPath Partitioner", "Interprets the <Partition> property as a RecordPath that will be evaluated against each Record to determine which partition the Record will go to. All Records " +
         "that have the same value for the given RecordPath will go to the same Partition.");
@@ -168,7 +169,7 @@ public class PublishKafkaRecord_2_6 extends AbstractProcessor implements Verifia
         .required(true)
         .expressionLanguageSupported(NONE)
         .allowableValues(DELIVERY_BEST_EFFORT, DELIVERY_ONE_NODE, DELIVERY_REPLICATED)
-        .defaultValue(DELIVERY_BEST_EFFORT.getValue())
+        .defaultValue(DELIVERY_REPLICATED.getValue())
         .build();
 
     static final PropertyDescriptor METADATA_WAIT_TIME = new Builder()

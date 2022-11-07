@@ -23,7 +23,6 @@
     </parent>
 
     <artifactId>nifi-system-test-extensions-nar</artifactId>
-    <version>1.18.0</version>
     <packaging>nar</packaging>
 
     <dependencies>
@@ -39,5 +38,4 @@
             <type>nar</type>
         </dependency>
     </dependencies>
-
 </project>

@@ -16,15 +16,13 @@
  */
 package org.apache.nifi.nar;
 
-import org.apache.commons.lang3.SystemUtils;
 import org.apache.nifi.bundle.Bundle;
 import org.apache.nifi.controller.ControllerService;
+import org.apache.nifi.parameter.ParameterProvider;
 import org.apache.nifi.processor.Processor;
 import org.apache.nifi.reporting.ReportingTask;
 import org.apache.nifi.util.NiFiProperties;
-import org.junit.Assume;
-import org.junit.Before;
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,8 +34,8 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public abstract class AbstractTestNarLoader {
     abstract String getWorkDir();
@@ -52,12 +50,7 @@ public abstract class AbstractTestNarLoader {
     NarClassLoaders narClassLoaders;
     ExtensionDiscoveringManager extensionManager;
 
-    @BeforeClass
-    public static void setupClass() {
-        Assume.assumeTrue("Test only runs on *nix", !SystemUtils.IS_OS_WINDOWS);
-    }
-
-    @Before
+    @BeforeEach
     public void setup() throws IOException, ClassNotFoundException {
         deleteDir(getWorkDir());
         deleteDir(getNarAutoloadDir());
@@ -71,7 +64,7 @@ public abstract class AbstractTestNarLoader {
 
         // Unpack NARs
         systemBundle = SystemBundle.create(properties);
-        extensionMapping = NarUnpacker.unpackNars(properties, systemBundle);
+        extensionMapping = NarUnpacker.unpackNars(properties, systemBundle, NarUnpackMode.UNPACK_INDIVIDUAL_JARS);
         assertEquals(0, extensionMapping.getAllExtensionNames().size());
 
         // Initialize NarClassLoaders
@@ -87,6 +80,7 @@ public abstract class AbstractTestNarLoader {
         assertEquals(0, extensionManager.getExtensions(Processor.class).size());
         assertEquals(0, extensionManager.getExtensions(ControllerService.class).size());
         assertEquals(0, extensionManager.getExtensions(ReportingTask.class).size());
+        assertEquals(0, extensionManager.getExtensions(ParameterProvider.class).size());
 
         // Create class we are testing
         narLoader = new StandardNarLoader(
@@ -96,7 +90,8 @@ public abstract class AbstractTestNarLoader {
                 extensionManager,
                 extensionMapping,
                 (bundles) -> {
-                });
+                },
+                NarUnpackMode.UNPACK_INDIVIDUAL_JARS);
     }
 
     private void deleteDir(String path) throws IOException {

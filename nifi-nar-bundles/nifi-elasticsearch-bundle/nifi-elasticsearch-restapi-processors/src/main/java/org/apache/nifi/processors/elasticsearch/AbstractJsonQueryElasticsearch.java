@@ -22,6 +22,7 @@ import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.elasticsearch.ElasticSearchClientService;
+import org.apache.nifi.elasticsearch.ElasticsearchException;
 import org.apache.nifi.elasticsearch.SearchResponse;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.FlowFile;
@@ -85,6 +86,17 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
             .required(true)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .build();
+    public static final PropertyDescriptor OUTPUT_NO_HITS = new PropertyDescriptor.Builder()
+            .name("el-rest-output-no-hits")
+            .displayName("Output No Hits")
+            .description("Output a \"" + REL_HITS.getName() + "\" flowfile even if no hits found for query. " +
+                    "If true, an empty \"" + REL_HITS.getName() + "\" flowfile will be output even if \"" +
+                    REL_AGGREGATIONS.getName() + "\" are output.")
+            .allowableValues("true", "false")
+            .defaultValue("false")
+            .required(true)
+            .expressionLanguageSupported(ExpressionLanguageScope.NONE)
+            .build();
 
     private static final Set<Relationship> relationships;
     private static final List<PropertyDescriptor> propertyDescriptors;
@@ -92,6 +104,7 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
     AtomicReference<ElasticSearchClientService> clientService;
     String splitUpHits;
     private String splitUpAggregations;
+    private boolean outputNoHits;
 
     final ObjectMapper mapper = new ObjectMapper();
 
@@ -111,6 +124,7 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
         descriptors.add(CLIENT_SERVICE);
         descriptors.add(SEARCH_RESULTS_SPLIT);
         descriptors.add(AGGREGATION_RESULTS_SPLIT);
+        descriptors.add(OUTPUT_NO_HITS);
 
         propertyDescriptors = Collections.unmodifiableList(descriptors);
     }
@@ -142,6 +156,8 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
 
         splitUpHits = context.getProperty(SEARCH_RESULTS_SPLIT).getValue();
         splitUpAggregations = context.getProperty(AGGREGATION_RESULTS_SPLIT).getValue();
+
+        outputNoHits = context.getProperty(OUTPUT_NO_HITS).asBoolean();
     }
 
     @OnStopped
@@ -168,9 +184,19 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
             final SearchResponse response = doQuery(queryJsonParameters, hitsFlowFiles, session, context, input, stopWatch);
 
             finishQuery(input, queryJsonParameters, session, context, response);
-        } catch (Exception ex) {
-            getLogger().error("Error processing flowfile.", ex);
+        } catch (final ElasticsearchException ese) {
+            final String msg = String.format("Encountered a server-side problem with Elasticsearch. %s",
+                    ese.isElastic() ? "Routing to retry." : "Routing to failure");
+            getLogger().error(msg, ese);
             if (input != null) {
+                session.penalize(input);
+                input = session.putAttribute(input, "elasticsearch.query.error", ese.getMessage());
+                session.transfer(input, ese.isElastic() ? REL_RETRY : REL_FAILURE);
+            }
+        } catch (Exception ex) {
+            getLogger().error("Could not query documents.", ex);
+            if (input != null) {
+                input = session.putAttribute(input, "elasticsearch.query.error", ex.getMessage());
                 session.transfer(input, REL_FAILURE);
             }
             context.yield();
@@ -260,7 +286,7 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
      * for paginated queries, the List could contain one (or more) FlowFiles, to which further hits may be appended when the next
      * SearchResponse is processed, i.e. this approach allows recursion for paginated queries, but is unnecessary for single-response queries.
      */
-    List<FlowFile> handleHits(final List<Map<String, Object>> hits, final Q queryJsonParameters, final ProcessSession session,
+    List<FlowFile> handleHits(final List<Map<String, Object>> hits, final boolean newQuery, final Q queryJsonParameters, final ProcessSession session,
                               final FlowFile parent, final Map<String, String> attributes, final List<FlowFile> hitsFlowFiles,
                               final String transitUri, final StopWatch stopWatch) throws IOException {
         if (hits != null && !hits.isEmpty()) {
@@ -275,6 +301,9 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
                 final String json = mapper.writeValueAsString(hits);
                 hitsFlowFiles.add(writeHitFlowFile(hits.size(), json, session, hitFlowFile, attributes));
             }
+        } else if (newQuery && outputNoHits) {
+            final FlowFile hitFlowFile = createChildFlowFile(session, parent);
+            hitsFlowFiles.add(writeHitFlowFile(0, "", session, hitFlowFile, attributes));
         }
 
         transferResultFlowFiles(session, hitsFlowFiles, transitUri, stopWatch);
@@ -308,7 +337,7 @@ public abstract class AbstractJsonQueryElasticsearch<Q extends JsonQueryParamete
             handleAggregations(response.getAggregations(), session, input, attributes, transitUri, stopWatch);
         }
 
-        final List<FlowFile> resultFlowFiles = handleHits(response.getHits(), queryJsonParameters, session, input,
+        final List<FlowFile> resultFlowFiles = handleHits(response.getHits(), newQuery, queryJsonParameters, session, input,
                 attributes, hitsFlowFiles, transitUri, stopWatch);
         queryJsonParameters.addHitCount(response.getHits().size());
 

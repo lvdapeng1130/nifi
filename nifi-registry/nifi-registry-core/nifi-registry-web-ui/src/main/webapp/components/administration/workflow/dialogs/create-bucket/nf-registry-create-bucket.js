@@ -18,7 +18,7 @@
 import { Component, ViewChild } from '@angular/core';
 import NfRegistryService from 'services/nf-registry.service';
 import NfRegistryApi from 'services/nf-registry.api';
-import { MatDialogRef } from '@angular/material';
+import { MatDialogRef } from '@angular/material/dialog';
 import { FdsSnackBarService } from '@nifi-fds/core';
 
 /**
@@ -88,8 +88,8 @@ NfRegistryCreateBucket.annotations = [
     new Component({
         templateUrl: './nf-registry-create-bucket.html',
         queries: {
-            newBucketName: new ViewChild('newBucketName'),
-            newBucketDescription: new ViewChild('newBucketDescription')
+            newBucketName: new ViewChild('newBucketName', { static: true }),
+            newBucketDescription: new ViewChild('newBucketDescription', { static: true })
         }
     })
 ];

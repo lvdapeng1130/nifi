@@ -31,6 +31,7 @@ import org.apache.nifi.authorization.user.NiFiUser;
 import org.apache.nifi.authorization.user.NiFiUserUtils;
 import org.apache.nifi.bundle.Bundle;
 import org.apache.nifi.bundle.BundleCoordinate;
+import org.apache.nifi.c2.protocol.component.api.RuntimeManifest;
 import org.apache.nifi.cluster.protocol.NodeIdentifier;
 import org.apache.nifi.components.ConfigurableComponent;
 import org.apache.nifi.components.RequiredPermission;
@@ -42,6 +43,7 @@ import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.controller.Counter;
 import org.apache.nifi.controller.FlowController;
 import org.apache.nifi.controller.FlowController.GroupStatusCounts;
+import org.apache.nifi.controller.ParameterProviderNode;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.ReportingTaskNode;
 import org.apache.nifi.controller.Template;
@@ -61,13 +63,16 @@ import org.apache.nifi.controller.status.analytics.StatusAnalytics;
 import org.apache.nifi.controller.status.analytics.StatusAnalyticsEngine;
 import org.apache.nifi.controller.status.history.StatusHistoryRepository;
 import org.apache.nifi.diagnostics.SystemDiagnostics;
+import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flowfile.FlowFilePrioritizer;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.groups.ProcessGroupCounts;
 import org.apache.nifi.groups.RemoteProcessGroup;
+import org.apache.nifi.manifest.RuntimeManifestService;
 import org.apache.nifi.nar.ExtensionDefinition;
 import org.apache.nifi.nar.ExtensionManager;
+import org.apache.nifi.parameter.ParameterProvider;
 import org.apache.nifi.processor.Processor;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.provenance.ProvenanceEventRecord;
@@ -80,7 +85,8 @@ import org.apache.nifi.provenance.search.QuerySubmission;
 import org.apache.nifi.provenance.search.SearchTerm;
 import org.apache.nifi.provenance.search.SearchTerms;
 import org.apache.nifi.provenance.search.SearchableField;
-import org.apache.nifi.flow.VersionedProcessGroup;
+import org.apache.nifi.registry.flow.FlowRegistryClient;
+import org.apache.nifi.registry.flow.FlowRegistryClientNode;
 import org.apache.nifi.remote.PublicPort;
 import org.apache.nifi.remote.RemoteGroupPort;
 import org.apache.nifi.reporting.BulletinRepository;
@@ -130,6 +136,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TimeZone;
@@ -153,6 +160,7 @@ public class ControllerFacade implements Authorizable {
     private DtoFactory dtoFactory;
     private SearchQueryParser searchQueryParser;
     private ControllerSearchService controllerSearchService;
+    private RuntimeManifestService runtimeManifestService;
 
     private ProcessGroup getRootGroup() {
         return flowController.getFlowManager().getRootGroup();
@@ -562,6 +570,36 @@ public class ControllerFacade implements Authorizable {
      */
     public Set<DocumentedTypeDTO> getReportingTaskTypes(final String bundleGroupFilter, final String bundleArtifactFilter, final String typeFilter) {
         return dtoFactory.fromDocumentedTypes(getExtensionManager().getExtensions(ReportingTask.class), bundleGroupFilter, bundleArtifactFilter, typeFilter);
+    }
+
+    /**
+     * Gets the FlowRegistryClient types that this controller supports.
+     *
+     * @return the FlowRegistryClient types that this controller supports
+     */
+    public Set<DocumentedTypeDTO> getFlowRegistryTypes() {
+        return dtoFactory.fromDocumentedTypes(getExtensionManager().getExtensions(FlowRegistryClient.class), null, null, null);
+    }
+
+    /**
+     * Gets the RuntimeManifest for this overall NiFi instance.
+     *
+     * @return the runtime manifest
+     */
+    public RuntimeManifest getRuntimeManifest() {
+        return runtimeManifestService.getManifest();
+    }
+
+    /**
+     * Gets the ParameterProvider types that this controller supports.
+     *
+     * @param bundleGroupFilter if specified, must be member of bundle group
+     * @param bundleArtifactFilter if specified, must be member of bundle artifact
+     * @param typeFilter if specified, type must match
+     * @return the ParameterProvider types that this controller supports
+     */
+    public Set<DocumentedTypeDTO> getParameterProviderTypes(final String bundleGroupFilter, final String bundleArtifactFilter, final String typeFilter) {
+        return dtoFactory.fromDocumentedTypes(getExtensionManager().getExtensions(ParameterProvider.class), bundleGroupFilter, bundleArtifactFilter, typeFilter);
     }
 
     /**
@@ -976,6 +1014,22 @@ public class ControllerFacade implements Authorizable {
             resources.add(ResourceFactory.getOperationResource(reportingTaskResource));
         }
 
+        // add each parameter provider
+        for (final ParameterProviderNode parameterProvider : flowController.getFlowManager().getAllParameterProviders()) {
+            final Resource parameterProviderResource = parameterProvider.getResource();
+            resources.add(parameterProviderResource);
+            resources.add(ResourceFactory.getPolicyResource(parameterProviderResource));
+            resources.add(ResourceFactory.getOperationResource(parameterProviderResource));
+        }
+
+        // add each flow registry client
+        for (final FlowRegistryClientNode flowRegistryClient : flowController.getFlowManager().getAllFlowRegistryClients()) {
+            final Resource flowRegistryResource = flowRegistryClient.getResource();
+            resources.add(flowRegistryResource);
+            resources.add(ResourceFactory.getPolicyResource(flowRegistryResource));
+            resources.add(ResourceFactory.getOperationResource(flowRegistryResource));
+        }
+
         // add each template
         for (final Template template : root.findAllTemplates()) {
             final Resource templateResource = template.getResource();
@@ -1347,6 +1401,39 @@ public class ControllerFacade implements Authorizable {
     }
 
     /**
+     * Submits for replay the latest provenance event that is cached for the component with the given ID
+     * @param componentId the ID of the component
+     * @return the ProvenanceEventDTO representing the event that was replayed, or <code>null</code> if the no event was available
+     * @throws AccessDeniedException if an event is available but the current user is not permitted to replay the event
+     */
+    public ProvenanceEventDTO submitReplayLastEvent(String componentId) {
+        try {
+            final NiFiUser user = NiFiUserUtils.getNiFiUser();
+            if (user == null) {
+                throw new WebApplicationException(new Throwable("Unable to access details for current user."));
+            }
+
+            // lookup the original event
+            final Optional<ProvenanceEventRecord> optionalEvent = flowController.getProvenanceRepository().getLatestCachedEvent(componentId);
+            if (!optionalEvent.isPresent()) {
+                return null;
+            }
+
+            // Authorize the replay
+            final ProvenanceEventRecord event = optionalEvent.get();
+            authorizeReplay(event);
+
+            // Replay the FlowFile
+            flowController.replayFlowFile(event, user);
+
+            // convert the event record
+            return createProvenanceEventDto(event, false);
+        } catch (final IOException ioe) {
+            throw new NiFiCoreException("An error occurred while getting the specified event.", ioe);
+        }
+    }
+
+    /**
      * Authorizes access to replay a specified provenance event. Whether to check read data permission can be specified. The context this
      * method is invoked may have already verified these permissions. Using a flag here as it forces the caller to acknowledge this fact
      * limiting the possibility of overlooking it.
@@ -1686,5 +1773,9 @@ public class ControllerFacade implements Authorizable {
 
     public void setControllerSearchService(ControllerSearchService controllerSearchService) {
         this.controllerSearchService = controllerSearchService;
+    }
+
+    public void setRuntimeManifestService(RuntimeManifestService runtimeManifestService) {
+        this.runtimeManifestService = runtimeManifestService;
     }
 }

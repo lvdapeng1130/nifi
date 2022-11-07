@@ -35,9 +35,10 @@ import org.apache.nifi.connectable.StandardConnection;
 import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.controller.FileSystemSwapManager;
 import org.apache.nifi.controller.FlowController;
+import org.apache.nifi.controller.FlowSerializationStrategy;
 import org.apache.nifi.controller.ProcessorNode;
-import org.apache.nifi.controller.StandardFlowSynchronizer;
 import org.apache.nifi.controller.StandardSnippet;
+import org.apache.nifi.controller.XmlFlowSynchronizer;
 import org.apache.nifi.controller.flow.StandardFlowManager;
 import org.apache.nifi.controller.leader.election.CuratorLeaderElectionManager;
 import org.apache.nifi.controller.leader.election.LeaderElectionManager;
@@ -71,6 +72,7 @@ import org.apache.nifi.encrypt.PropertyEncryptor;
 import org.apache.nifi.engine.FlowEngine;
 import org.apache.nifi.events.VolatileBulletinRepository;
 import org.apache.nifi.flowfile.FlowFile;
+import org.apache.nifi.groups.BundleUpdateStrategy;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.integration.processor.BiConsumerProcessor;
 import org.apache.nifi.integration.processors.GenerateProcessor;
@@ -82,7 +84,7 @@ import org.apache.nifi.logging.LogRepositoryFactory;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.nar.SystemBundle;
 import org.apache.nifi.persistence.FlowConfigurationDAO;
-import org.apache.nifi.persistence.StandardXMLFlowConfigurationDAO;
+import org.apache.nifi.persistence.StandardFlowConfigurationDAO;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Processor;
@@ -93,8 +95,6 @@ import org.apache.nifi.provenance.ProvenanceEventType;
 import org.apache.nifi.provenance.ProvenanceRepository;
 import org.apache.nifi.provenance.WriteAheadProvenanceRepository;
 import org.apache.nifi.registry.VariableRegistry;
-import org.apache.nifi.registry.flow.FlowRegistryClient;
-import org.apache.nifi.registry.flow.StandardFlowRegistryClient;
 import org.apache.nifi.reporting.BulletinRepository;
 import org.apache.nifi.scheduling.SchedulingStrategy;
 import org.apache.nifi.services.FlowService;
@@ -113,7 +113,6 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -147,7 +146,6 @@ public class FrameworkIntegrationTest {
 
     private FlowEngine flowEngine;
     private FlowController flowController;
-    private FlowRegistryClient flowRegistryClient = createFlowRegistryClient();
     private ProcessorNode nopProcessor;
     private ProcessorNode terminateProcessor;
     private ProcessorNode terminateAllProcessor;
@@ -192,17 +190,12 @@ public class FrameworkIntegrationTest {
         final Map<String, String> propertyOverrides = new HashMap<>(getNiFiPropertiesOverrides());
         if (isClusteredTest()) {
             propertyOverrides.put(NiFiProperties.CLUSTER_IS_NODE, "true");
+            // TODO: Update to use JSON
+            propertyOverrides.put(NiFiProperties.FLOW_CONFIGURATION_FILE, "target/int-tests/flow.xml.gz");
         }
 
         final NiFiProperties nifiProperties = NiFiProperties.createBasicNiFiProperties(getNiFiPropertiesFilename(), propertyOverrides);
         initialize(nifiProperties);
-    }
-
-    /**
-     * This method exists for subclasses to override and return a different implementation.
-     */
-    protected FlowRegistryClient createFlowRegistryClient() {
-        return new StandardFlowRegistryClient();
     }
 
     protected final void initialize(final NiFiProperties nifiProperties) throws IOException {
@@ -270,7 +263,7 @@ public class FrameworkIntegrationTest {
             Mockito.when(clusterCoordinator.getLocalNodeIdentifier()).thenReturn(localNodeId);
 
             flowController = FlowController.createClusteredInstance(flowFileEventRepository, nifiProperties, authorizer, auditService, encryptor, protocolSender,
-                    bulletinRepo, clusterCoordinator, heartbeatMonitor, leaderElectionManager, VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, flowRegistryClient,
+                    bulletinRepo, clusterCoordinator, heartbeatMonitor, leaderElectionManager, VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY,
                     extensionManager, Mockito.mock(RevisionManager.class), statusHistoryRepository);
 
             flowController.setClustered(true, UUID.randomUUID().toString());
@@ -279,13 +272,13 @@ public class FrameworkIntegrationTest {
             flowController.setConnectionStatus(new NodeConnectionStatus(localNodeId, NodeConnectionState.CONNECTED));
         } else {
             flowController = FlowController.createStandaloneInstance(flowFileEventRepository, nifiProperties, authorizer, auditService, encryptor, bulletinRepo,
-                VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, flowRegistryClient, extensionManager, statusHistoryRepository);
+                VariableRegistry.ENVIRONMENT_SYSTEM_REGISTRY, extensionManager, statusHistoryRepository);
         }
 
-        processScheduler = new StandardProcessScheduler(flowEngine, flowController, encryptor, flowController.getStateManagerProvider(), nifiProperties);
+        processScheduler = new StandardProcessScheduler(flowEngine, flowController, flowController.getStateManagerProvider(), nifiProperties);
 
         final RepositoryContextFactory repositoryContextFactory = flowController.getRepositoryContextFactory();
-        final SchedulingAgent timerDrivenSchedulingAgent = new TimerDrivenSchedulingAgent(flowController, flowEngine, repositoryContextFactory, encryptor, nifiProperties);
+        final SchedulingAgent timerDrivenSchedulingAgent = new TimerDrivenSchedulingAgent(flowController, flowEngine, repositoryContextFactory, nifiProperties);
         processScheduler.setSchedulingAgent(SchedulingStrategy.TIMER_DRIVEN, timerDrivenSchedulingAgent);
 
         flowFileSwapManager = flowController.createSwapManager();
@@ -332,7 +325,7 @@ public class FrameworkIntegrationTest {
         logger.info("Shutting down for restart....");
 
         // Save Flow to a byte array
-        final FlowConfigurationDAO flowDao = new StandardXMLFlowConfigurationDAO(Paths.get("target/int-tests/flow.xml.gz"), flowController.getEncryptor(), nifiProperties, getExtensionManager());
+        final FlowConfigurationDAO flowDao = new StandardFlowConfigurationDAO(nifiProperties, getExtensionManager(), FlowSerializationStrategy.WRITE_XML_AND_JSON);
         final ByteArrayOutputStream baos = new ByteArrayOutputStream();
         flowDao.save(flowController, baos);
         final byte[] flowBytes = baos.toByteArray();
@@ -351,8 +344,9 @@ public class FrameworkIntegrationTest {
         initialize();
 
         // Reload the flow
-        final FlowSynchronizer flowSynchronizer = new StandardFlowSynchronizer(flowController.getEncryptor(), nifiProperties, extensionManager);
-        flowController.synchronize(flowSynchronizer, new StandardDataFlow(flowBytes, null, null, Collections.emptySet()), Mockito.mock(FlowService.class));
+        final FlowSynchronizer flowSynchronizer = new XmlFlowSynchronizer(nifiProperties, extensionManager);
+        flowController.synchronize(flowSynchronizer, new StandardDataFlow(flowBytes, null, null, Collections.emptySet()), Mockito.mock(FlowService.class),
+            BundleUpdateStrategy.USE_SPECIFIED_OR_COMPATIBLE_OR_GHOST);
 
         // Reload FlowFiles / initialize flow
         final ProcessGroup newRootGroup = flowController.getFlowManager().getRootGroup();
@@ -404,8 +398,10 @@ public class FrameworkIntegrationTest {
     protected final ProcessorNode createProcessorNode(final String processorType, final ProcessGroup destination) {
         final String uuid = getSimpleTypeName(processorType) + "-" + UUID.randomUUID().toString();
         final BundleCoordinate bundleCoordinate = SystemBundle.SYSTEM_BUNDLE_COORDINATE;
-        final ProcessorNode procNode = flowController.getFlowManager().createProcessor(processorType, uuid, bundleCoordinate, Collections.emptySet(), true, true);
-        destination.addProcessor(procNode);
+        final ProcessorNode procNode = flowController.getFlowManager().createProcessor(processorType, uuid, bundleCoordinate, Collections.emptySet(), true, true, null);
+        if (destination != null) {
+            destination.addProcessor(procNode);
+        }
 
         return procNode;
     }
@@ -417,7 +413,7 @@ public class FrameworkIntegrationTest {
     protected final ControllerServiceNode createControllerServiceNode(final String controllerServiceType) {
         final String uuid = getSimpleTypeName(controllerServiceType) + "-" + UUID.randomUUID().toString();
         final BundleCoordinate bundleCoordinate = SystemBundle.SYSTEM_BUNDLE_COORDINATE;
-        final ControllerServiceNode serviceNode = flowController.getFlowManager().createControllerService(controllerServiceType, uuid, bundleCoordinate, Collections.emptySet(), true, true);
+        final ControllerServiceNode serviceNode = flowController.getFlowManager().createControllerService(controllerServiceType, uuid, bundleCoordinate, Collections.emptySet(), true, true, null);
         rootProcessGroup.addControllerService(serviceNode);
         return serviceNode;
     }
@@ -578,7 +574,7 @@ public class FrameworkIntegrationTest {
         final FlowFileEvent initialReport = getStatusReport(processor);
         final int initialInvocations = (initialReport == null) ? 0 : initialReport.getInvocations();
 
-        processor.setScheduldingPeriod("1 hour");
+        processor.setSchedulingPeriod("1 hour");
 
         // We will only trigger the Processor to run once per hour. So we need to ensure that
         // we don't trigger the Processor while it's yielded. So if its yield expiration is in the future,
@@ -596,7 +592,7 @@ public class FrameworkIntegrationTest {
         }
 
         stop(processor).get();
-        processor.setScheduldingPeriod(schedulingPeriod);
+        processor.setSchedulingPeriod(schedulingPeriod);
     }
 
     protected FlowFileEvent getStatusReport(final ProcessorNode processor) {

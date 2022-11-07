@@ -25,6 +25,7 @@ import org.apache.nifi.connectable.Connectable;
 import org.apache.nifi.connectable.Connection;
 import org.apache.nifi.connectable.Funnel;
 import org.apache.nifi.connectable.Port;
+import org.apache.nifi.controller.ParameterProviderNode;
 import org.apache.nifi.controller.ProcessScheduler;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.ReportingTaskNode;
@@ -38,15 +39,15 @@ import org.apache.nifi.nar.NarCloseable;
 import org.apache.nifi.parameter.Parameter;
 import org.apache.nifi.parameter.ParameterContext;
 import org.apache.nifi.parameter.ParameterContextManager;
+import org.apache.nifi.parameter.ParameterProviderConfiguration;
 import org.apache.nifi.parameter.ParameterReferenceManager;
 import org.apache.nifi.parameter.ReferenceOnlyParameterContext;
 import org.apache.nifi.parameter.StandardParameterContext;
 import org.apache.nifi.parameter.StandardParameterReferenceManager;
-import org.apache.nifi.registry.flow.FlowRegistryClient;
+import org.apache.nifi.registry.flow.FlowRegistryClientNode;
 import org.apache.nifi.remote.PublicPort;
 import org.apache.nifi.remote.RemoteGroupPort;
 import org.apache.nifi.util.ReflectionUtils;
-import org.apache.nifi.web.api.entity.ParameterContextReferenceEntity;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -59,6 +60,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
@@ -70,10 +73,11 @@ public abstract class AbstractFlowManager implements FlowManager {
     private final ConcurrentMap<String, Port> allOutputPorts = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Funnel> allFunnels = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, ReportingTaskNode> allReportingTasks = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, ParameterProviderNode> allParameterProviders = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, FlowRegistryClientNode> allFlowRegistryClients = new ConcurrentHashMap<>();
 
     private final FlowFileEventRepository flowFileEventRepository;
     private final ParameterContextManager parameterContextManager;
-    private final FlowRegistryClient flowRegistryClient;
     private final BooleanSupplier flowInitializedCheck;
 
     private volatile ControllerServiceProvider controllerServiceProvider;
@@ -82,10 +86,9 @@ public abstract class AbstractFlowManager implements FlowManager {
     private final ThreadLocal<Boolean> withParameterContextResolution = ThreadLocal.withInitial(() -> false);
 
     public AbstractFlowManager(final FlowFileEventRepository flowFileEventRepository, final ParameterContextManager parameterContextManager,
-                               final FlowRegistryClient flowRegistryClient, final BooleanSupplier flowInitializedCheck) {
+                               final BooleanSupplier flowInitializedCheck) {
         this.flowFileEventRepository = flowFileEventRepository;
         this.parameterContextManager = parameterContextManager;
-        this.flowRegistryClient = flowRegistryClient;
         this.flowInitializedCheck = flowInitializedCheck;
     }
 
@@ -113,6 +116,12 @@ public abstract class AbstractFlowManager implements FlowManager {
         String identifier = procNode.getIdentifier();
         flowFileEventRepository.purgeTransferEvents(identifier);
         allProcessors.remove(identifier);
+    }
+
+    public Set<ProcessorNode> findAllProcessors(final Predicate<ProcessorNode> filter) {
+        return allProcessors.values().stream()
+            .filter(filter)
+            .collect(Collectors.toSet());
     }
 
     public Connectable findConnectable(final String id) {
@@ -210,6 +219,8 @@ public abstract class AbstractFlowManager implements FlowManager {
         componentCounts.put("Reporting Tasks", getAllReportingTasks().size());
         componentCounts.put("Process Groups", allProcessGroups.size() - 2); // -2 to account for the root group because we don't want it in our counts and the 'root group alias' key.
         componentCounts.put("Remote Process Groups", getRootGroup().findAllRemoteProcessGroups().size());
+        componentCounts.put("Parameter Providers", getAllParameterProviders().size());
+        componentCounts.put("Flow Registry Clients", getAllFlowRegistryClients().size());
 
         int localInputPorts = 0;
         int publicInputPorts = 0;
@@ -266,14 +277,15 @@ public abstract class AbstractFlowManager implements FlowManager {
 
         getRootControllerServices().forEach(this::removeRootControllerService);
         getAllReportingTasks().forEach(this::removeReportingTask);
+        getAllParameterProviders().forEach(this::removeParameterProvider);
 
-        for (final String registryId : flowRegistryClient.getRegistryIdentifiers()) {
-            flowRegistryClient.removeFlowRegistry(registryId);
-        }
+        getAllFlowRegistryClients().forEach(this::removeFlowRegistryClientNode);
 
         for (final ParameterContext parameterContext : parameterContextManager.getParameterContexts()) {
             parameterContextManager.removeParameterContext(parameterContext.getIdentifier());
         }
+
+        LogRepositoryFactory.purge();
     }
 
     private void verifyCanPurge() {
@@ -283,6 +295,10 @@ public abstract class AbstractFlowManager implements FlowManager {
 
         for (final ReportingTaskNode reportingTask : getAllReportingTasks()) {
             reportingTask.verifyCanDelete();
+        }
+
+        for (final ParameterProviderNode parameterProvider : getAllParameterProviders()) {
+            parameterProvider.verifyCanDelete();
         }
 
         final ProcessGroup rootGroup = getRootGroup();
@@ -347,7 +363,7 @@ public abstract class AbstractFlowManager implements FlowManager {
     }
 
     public ProcessorNode createProcessor(final String type, String id, final BundleCoordinate coordinate, final boolean firstTimeAdded) {
-        return createProcessor(type, id, coordinate, Collections.emptySet(), firstTimeAdded, true);
+        return createProcessor(type, id, coordinate, Collections.emptySet(), firstTimeAdded, true, null);
     }
 
     public ReportingTaskNode createReportingTask(final String type, final BundleCoordinate bundleCoordinate) {
@@ -360,11 +376,16 @@ public abstract class AbstractFlowManager implements FlowManager {
 
     @Override
     public ReportingTaskNode createReportingTask(final String type, final String id, final BundleCoordinate bundleCoordinate, final boolean firstTimeAdded) {
-        return createReportingTask(type, id, bundleCoordinate, Collections.emptySet(), firstTimeAdded, true);
+        return createReportingTask(type, id, bundleCoordinate, Collections.emptySet(), firstTimeAdded, true, null);
     }
 
     public ReportingTaskNode getReportingTaskNode(final String taskId) {
         return allReportingTasks.get(taskId);
+    }
+
+    @Override
+    public ParameterProviderNode createParameterProvider(final String type, final String id, final BundleCoordinate bundleCoordinate, final boolean firstTimeAdded) {
+        return createParameterProvider(type, id, bundleCoordinate, Collections.emptySet(), firstTimeAdded, true);
     }
 
     @Override
@@ -405,6 +426,51 @@ public abstract class AbstractFlowManager implements FlowManager {
         allReportingTasks.put(taskNode.getIdentifier(), taskNode);
     }
 
+    @Override
+    public ParameterProviderNode getParameterProvider(final String id) {
+        return id == null ? null : allParameterProviders.get(id);
+    }
+
+    @Override
+    public void removeParameterProvider(final ParameterProviderNode parameterProvider) {
+        final ParameterProviderNode existing = allParameterProviders.get(parameterProvider.getIdentifier());
+        if (existing == null || existing != parameterProvider) {
+            throw new IllegalStateException("Parameter Provider " + parameterProvider + " does not exist in this Flow");
+        }
+
+        final Class<?> taskClass = parameterProvider.getParameterProvider().getClass();
+        try (final NarCloseable x = NarCloseable.withComponentNarLoader(getExtensionManager(), taskClass, parameterProvider.getParameterProvider().getIdentifier())) {
+            ReflectionUtils.quietlyInvokeMethodsWithAnnotation(OnRemoved.class, parameterProvider.getParameterProvider(), parameterProvider.getConfigurationContext());
+        }
+
+        for (final Map.Entry<PropertyDescriptor, String> entry : parameterProvider.getEffectivePropertyValues().entrySet()) {
+            final PropertyDescriptor descriptor = entry.getKey();
+            if (descriptor.getControllerServiceDefinition() != null) {
+                final String value = entry.getValue() == null ? descriptor.getDefaultValue() : entry.getValue();
+                if (value != null) {
+                    final ControllerServiceNode serviceNode = controllerServiceProvider.getControllerServiceNode(value);
+                    if (serviceNode != null) {
+                        serviceNode.removeReference(parameterProvider, descriptor);
+                    }
+                }
+            }
+        }
+
+        allParameterProviders.remove(parameterProvider.getIdentifier());
+        LogRepositoryFactory.removeRepository(parameterProvider.getIdentifier());
+
+        getExtensionManager().removeInstanceClassLoader(parameterProvider.getIdentifier());
+    }
+
+    @Override
+    public Set<ParameterProviderNode> getAllParameterProviders() {
+        return new HashSet<>(allParameterProviders.values());
+    }
+
+    public void onParameterProviderAdded(final ParameterProviderNode parameterProviderNode) {
+        allParameterProviders.put(parameterProviderNode.getIdentifier(), parameterProviderNode);
+    }
+
     protected abstract ExtensionManager getExtensionManager();
 
     protected abstract ProcessScheduler getProcessScheduler();
@@ -415,31 +481,60 @@ public abstract class AbstractFlowManager implements FlowManager {
     }
 
     @Override
+    public FlowRegistryClientNode getFlowRegistryClient(final String id) {
+        if (id == null) {
+            return null;
+        }
+        return allFlowRegistryClients.get(id);
+    }
+
+    @Override
+    public Set<FlowRegistryClientNode> getAllFlowRegistryClients() {
+        return new HashSet<>(allFlowRegistryClients.values());
+    }
+
+    public void onFlowRegistryClientAdded(final FlowRegistryClientNode clientNode) {
+        allFlowRegistryClients.put(clientNode.getIdentifier(), clientNode);
+    }
+
+    public void onFlowRegistryClientRemoved(final FlowRegistryClientNode clientNode) {
+        allFlowRegistryClients.remove(clientNode.getIdentifier());
+    }
+
+    @Override
     public ParameterContextManager getParameterContextManager() {
         return parameterContextManager;
     }
 
     @Override
     public ParameterContext createParameterContext(final String id, final String name, final Map<String, Parameter> parameters,
-                                                   final List<ParameterContextReferenceEntity> parameterContexts) {
+                                                   final List<String> inheritedContextIds,
+                                                   final ParameterProviderConfiguration parameterProviderConfiguration) {
         final boolean namingConflict = parameterContextManager.getParameterContexts().stream()
-            .anyMatch(paramContext -> paramContext.getName().equals(name));
+                .anyMatch(paramContext -> paramContext.getName().equals(name));
 
         if (namingConflict) {
             throw new IllegalStateException("Cannot create Parameter Context with name '" + name + "' because a Parameter Context already exists with that name");
         }
 
         final ParameterReferenceManager referenceManager = new StandardParameterReferenceManager(this);
-        final ParameterContext parameterContext = new StandardParameterContext(id, name, referenceManager, getParameterContextParent());
+        final ParameterContext parameterContext = new StandardParameterContext.Builder()
+                .id(id)
+                .name(name)
+                .parameterReferenceManager(referenceManager)
+                .parentAuthorizable(getParameterContextParent())
+                .parameterProviderLookup(this)
+                .parameterProviderConfiguration(parameterProviderConfiguration)
+                .build();
         parameterContext.setParameters(parameters);
 
-        if (parameterContexts != null && !parameterContexts.isEmpty()) {
+        if (inheritedContextIds != null && !inheritedContextIds.isEmpty()) {
             if (!withParameterContextResolution.get()) {
                 throw new IllegalStateException("A ParameterContext with inherited ParameterContexts may only be created from within a call to AbstractFlowManager#withParameterContextResolution");
             }
             final List<ParameterContext> parameterContextList = new ArrayList<>();
-            for(final ParameterContextReferenceEntity parameterContextRef : parameterContexts) {
-                parameterContextList.add(lookupParameterContext(parameterContextRef.getId()));
+            for(final String inheritedContextId : inheritedContextIds) {
+                parameterContextList.add(lookupParameterContext(inheritedContextId));
             }
             parameterContext.setInheritedParameterContexts(parameterContextList);
         }
@@ -451,8 +546,11 @@ public abstract class AbstractFlowManager implements FlowManager {
     @Override
     public void withParameterContextResolution(final Runnable parameterContextAction) {
         withParameterContextResolution.set(true);
-        parameterContextAction.run();
-        withParameterContextResolution.set(false);
+        try {
+            parameterContextAction.run();
+        } finally {
+            withParameterContextResolution.set(false);
+        }
 
         for (final ParameterContext parameterContext : parameterContextManager.getParameterContexts()) {
             // if a param context in the manager itself is reference-only, it means there is a reference to a param
@@ -495,8 +593,8 @@ public abstract class AbstractFlowManager implements FlowManager {
         if (!parameterContextManager.hasParameterContext(id)) {
             parameterContextManager.addParameterContext(new ReferenceOnlyParameterContext(id));
         }
-        return parameterContextManager.getParameterContext(id);
 
+        return parameterContextManager.getParameterContext(id);
     }
 
     protected abstract Authorizable getParameterContextParent();

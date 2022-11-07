@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <!--
       Licensed to the Apache Software Foundation (ASF) under one or more
       contributor license agreements. See the NOTICE file distributed with
@@ -23,9 +23,6 @@
 
     <artifactId>nifi-easyrules-bundle</artifactId>
     <packaging>pom</packaging>
-    <properties>
-        <spring.version>5.3.11</spring.version>
-    </properties>
     <modules>
         <module>nifi-easyrules-service</module>
         <module>nifi-easyrules-nar</module>
@@ -37,12 +34,6 @@
                 <groupId>org.apache.nifi</groupId>
                 <artifactId>nifi-easyrules-service</artifactId>
                 <version>1.18.0</version>
-            </dependency>
-            <!-- Set Spring Expression version for easy-rules-spel -->
-            <dependency>
-                <groupId>org.springframework</groupId>
-                <artifactId>spring-expression</artifactId>
-                <version>${spring.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

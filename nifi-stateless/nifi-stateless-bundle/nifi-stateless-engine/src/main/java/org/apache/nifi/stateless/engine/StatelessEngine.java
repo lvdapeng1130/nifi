@@ -30,16 +30,17 @@ import org.apache.nifi.encrypt.PropertyEncryptor;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.provenance.ProvenanceRepository;
 import org.apache.nifi.registry.VariableRegistry;
-import org.apache.nifi.registry.flow.FlowRegistryClient;
 import org.apache.nifi.reporting.BulletinRepository;
 import org.apache.nifi.stateless.flow.DataflowDefinition;
 import org.apache.nifi.stateless.flow.StatelessDataflow;
 
-public interface StatelessEngine<T> {
+import java.time.Duration;
+
+public interface StatelessEngine {
 
     void initialize(StatelessEngineInitializationContext initializationContext);
 
-    StatelessDataflow createFlow(DataflowDefinition<T> dataflowDefinition);
+    StatelessDataflow createFlow(DataflowDefinition dataflowDefinition);
 
     ExtensionManager getExtensionManager();
 
@@ -48,8 +49,6 @@ public interface StatelessEngine<T> {
     StateManagerProvider getStateManagerProvider();
 
     PropertyEncryptor getPropertyEncryptor();
-
-    FlowRegistryClient getFlowRegistryClient();
 
     FlowManager getFlowManager();
 
@@ -70,4 +69,6 @@ public interface StatelessEngine<T> {
     FlowFileEventRepository getFlowFileEventRepository();
 
     CounterRepository getCounterRepository();
+
+    Duration getStatusTaskInterval();
 }

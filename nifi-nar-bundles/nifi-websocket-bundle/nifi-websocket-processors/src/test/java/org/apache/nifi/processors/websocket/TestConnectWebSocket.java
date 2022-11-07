@@ -33,8 +33,7 @@ import org.apache.nifi.websocket.WebSocketMessage;
 import org.apache.nifi.websocket.WebSocketSession;
 import org.apache.nifi.websocket.jetty.JettyWebSocketClient;
 import org.apache.nifi.websocket.jetty.JettyWebSocketServer;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.util.HashMap;
@@ -44,15 +43,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 
-public class TestConnectWebSocket extends TestListenWebSocket {
+class TestConnectWebSocket extends TestListenWebSocket {
 
     @Test
     public void testSuccess() throws Exception {
@@ -108,9 +107,7 @@ public class TestConnectWebSocket extends TestListenWebSocket {
 
         List<MockFlowFile> connectedFlowFiles = transferredFlowFiles.get(AbstractWebSocketGatewayProcessor.REL_CONNECTED);
         assertEquals(1, connectedFlowFiles.size());
-        connectedFlowFiles.forEach(ff -> {
-            assertFlowFile(webSocketSession, serviceId, endpointId, ff, null);
-        });
+        connectedFlowFiles.forEach(ff -> assertFlowFile(webSocketSession, serviceId, endpointId, ff, null));
 
         List<MockFlowFile> textFlowFiles = transferredFlowFiles.get(AbstractWebSocketGatewayProcessor.REL_MESSAGE_TEXT);
         assertEquals(2, textFlowFiles.size());
@@ -120,9 +117,7 @@ public class TestConnectWebSocket extends TestListenWebSocket {
 
         List<MockFlowFile> binaryFlowFiles = transferredFlowFiles.get(AbstractWebSocketGatewayProcessor.REL_MESSAGE_BINARY);
         assertEquals(3, binaryFlowFiles.size());
-        binaryFlowFiles.forEach(ff -> {
-            assertFlowFile(webSocketSession, serviceId, endpointId, ff, WebSocketMessage.Type.BINARY);
-        });
+        binaryFlowFiles.forEach(ff -> assertFlowFile(webSocketSession, serviceId, endpointId, ff, WebSocketMessage.Type.BINARY));
 
         final List<ProvenanceEventRecord> provenanceEvents = sharedSessionState.getProvenanceEvents();
         assertEquals(6, provenanceEvents.size());
@@ -130,7 +125,7 @@ public class TestConnectWebSocket extends TestListenWebSocket {
     }
 
     @Test
-    public void testDynamicUrlsParsedFromFlowFileAndAbleToConnect() throws InitializationException {
+    void testDynamicUrlsParsedFromFlowFileAndAbleToConnect() throws InitializationException {
         // Start websocket server
         final int port = NetworkUtils.availablePort();
         TestRunner webSocketListener = getListenWebSocket(port);
@@ -166,9 +161,6 @@ public class TestConnectWebSocket extends TestListenWebSocket {
 
         final List<MockFlowFile> flowFilesForRelationship = runner.getFlowFilesForRelationship(ConnectWebSocket.REL_CONNECTED);
         assertEquals(1, flowFilesForRelationship.size());
-
-        final AssertionError assertionError = Assert.assertThrows(AssertionError.class, () -> runner.run(1));
-        assertTrue(assertionError.getCause().getLocalizedMessage().contains("Failed to renew session and connect to WebSocket service"));
 
         runner.stop();
         webSocketListener.stop();

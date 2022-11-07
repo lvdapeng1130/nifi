@@ -48,6 +48,7 @@
                                 <descriptor>src/main/assembly/dependencies.xml</descriptor>
                             </descriptors>
                             <tarLongFileMode>posix</tarLongFileMode>
+                            <formats>zip</formats>
                         </configuration>
                     </execution>
                 </executions>
@@ -58,18 +59,22 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>jcl-over-slf4j</artifactId>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>jul-to-slf4j</artifactId>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>log4j-over-slf4j</artifactId>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -91,6 +96,11 @@
         <dependency>
             <groupId>org.apache.nifi.registry</groupId>
             <artifactId>nifi-registry-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-property-utils</artifactId>
+            <version>1.18.0</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi.registry</groupId>
@@ -141,28 +151,12 @@
             <groupId>org.glassfish.jaxb</groupId>
             <artifactId>jaxb-runtime</artifactId>
         </dependency>
+        <!-- Dependencies for sensitive properties providers that will be written out to lib/spp and excluded from lib -->
+        <dependency>
+            <groupId>org.apache.nifi.registry</groupId>
+            <artifactId>nifi-registry-properties-loader</artifactId>
+        </dependency>
     </dependencies>
-
-    <dependencyManagement>
-        <dependencies>
-            <!-- Override jackson -->
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-annotations</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-core</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <properties>
         <!-- nifi-registry.properties: web properties -->
@@ -196,6 +190,7 @@
         <nifi.registry.registry.alias.configuration.file>./conf/registry-aliases.xml</nifi.registry.registry.alias.configuration.file>
 
         <!-- nifi-registry.properties: extension properties -->
+        <nifi.registry.extension.archive.type>zip</nifi.registry.extension.archive.type>
         <nifi.registry.extensions.working.directory>./work/extensions</nifi.registry.extensions.working.directory>
         <nifi.registry.extension.dir.aws />
 
@@ -367,51 +362,11 @@
                                         </mapping>
                                         <mapping>
                                             <directory>/opt/nifi-registry/nifi-registry-${project.version}/lib</directory>
-                                        </mapping>
-                                        <!--
-                                            The lib/shared mapping includes the common dependencies between the registry
-                                            application (lib) and registry bootstrap (lib/bootstrap).
-
-                                            The lib/bootstrap mapping then excludes what was in lib/shared and includes
-                                            the other dependencies needed for the registry bootstrap.
-
-                                            The lib mapping excludes what was in lib/shared and excluded the bootstrap module,
-                                            and would bring in everything else from the lib directory of a non RPM build.
-                                            -->
-                                        <mapping>
-                                            <directory>/opt/nifi-registry/nifi-registry-${project.version}/lib</directory>
-                                            <dependency>
-                                                <excludes>
-                                                    <exclude>org.apache.commons:commons-lang3</exclude>
-                                                    <exclude>org.apache.nifi.registry:nifi-registry-utils</exclude>
-                                                    <exclude>org.apache.nifi.registry:nifi-registry-bootstrap</exclude>
-                                                    <exclude>org.apache.nifi.registry:nifi-registry-docs</exclude>
-                                                </excludes>
-                                            </dependency>
-                                        </mapping>
-                                        <mapping>
-                                            <directory>/opt/nifi-registry/nifi-registry-${project.version}/lib/bootstrap</directory>
-                                            <dependency>
-                                                <includes>
-                                                    <include>org.slf4j:slf4j-api</include>
-                                                    <include>ch.qos.logback:logback-classic</include>
-                                                    <include>ch.qos.logback:logback-core</include>
-                                                    <include>org.apache.nifi.registry:nifi-registry-bootstrap</include>
-                                                </includes>
-                                                <excludes>
-                                                    <exclude>org.apache.commons:commons-lang3</exclude>
-                                                    <exclude>org.apache.nifi.registry:nifi-registry-utils</exclude>
-                                                </excludes>
-                                            </dependency>
-                                        </mapping>
-                                        <mapping>
-                                            <directory>/opt/nifi-registry/nifi-registry-${project.version}/lib/shared</directory>
-                                            <dependency>
-                                                <includes>
-                                                    <include>org.apache.commons:commons-lang3</include>
-                                                    <include>org.apache.nifi.registry:nifi-registry-utils</include>
-                                                </includes>
-                                            </dependency>
+                                            <sources>
+                                                <source>
+                                                    <location>${project.build.directory}/nifi-registry-${project.version}-bin/nifi-registry-${project.version}/lib</location>
+                                                </source>
+                                            </sources>
                                         </mapping>
                                         <mapping>
                                             <directory>/opt/nifi-registry/nifi-registry-${project.version}/docs</directory>
@@ -441,7 +396,7 @@
                     <version>1.18.0</version>
                     <classifier>bin</classifier>
                     <scope>runtime</scope>
-                    <type>zip</type>
+                    <type>${nifi.registry.extension.archive.type}</type>
                 </dependency>
             </dependencies>
             <build>
@@ -484,7 +439,7 @@
                     <version>1.18.0</version>
                     <classifier>bin</classifier>
                     <scope>runtime</scope>
-                    <type>zip</type>
+                    <type>${nifi.registry.extension.archive.type}</type>
                 </dependency>
             </dependencies>
             <build>
@@ -503,6 +458,84 @@
                                     <includeGroupIds>org.apache.nifi.registry</includeGroupIds>
                                     <includeArtifactIds>nifi-registry-aws-assembly</includeArtifactIds>
                                     <excludeTransitive>false</excludeTransitive>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>targz</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <properties>
+                <nifi.registry.extension.archive.type>tar.gz</nifi.registry.extension.archive.type>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <configuration>
+                            <finalName>nifi-registry-${project.version}</finalName>
+                            <attach>false</attach>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>make shared resource</id>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <phase>package</phase>
+                                <configuration>
+                                    <archiverConfig>
+                                        <defaultDirectoryMode>0775</defaultDirectoryMode>
+                                        <directoryMode>0775</directoryMode>
+                                        <fileMode>0664</fileMode>
+                                    </archiverConfig>
+                                    <descriptors>
+                                        <descriptor>src/main/assembly/dependencies.xml</descriptor>
+                                    </descriptors>
+                                    <tarLongFileMode>posix</tarLongFileMode>
+                                    <formats>tar.gz</formats>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>dir-only</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <configuration>
+                            <finalName>nifi-registry-${project.version}</finalName>
+                            <attach>false</attach>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>make shared resource</id>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <phase>package</phase>
+                                <configuration>
+                                    <archiverConfig>
+                                        <defaultDirectoryMode>0775</defaultDirectoryMode>
+                                        <directoryMode>0775</directoryMode>
+                                        <fileMode>0664</fileMode>
+                                    </archiverConfig>
+                                    <descriptors>
+                                        <descriptor>src/main/assembly/dependencies.xml</descriptor>
+                                    </descriptors>
+                                    <formats>dir</formats>
                                 </configuration>
                             </execution>
                         </executions>

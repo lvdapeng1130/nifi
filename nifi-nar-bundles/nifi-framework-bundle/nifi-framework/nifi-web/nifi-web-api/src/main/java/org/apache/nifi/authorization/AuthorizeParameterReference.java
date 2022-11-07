@@ -25,8 +25,8 @@ import org.apache.nifi.parameter.ParameterContext;
 import org.apache.nifi.parameter.ParameterDescriptor;
 import org.apache.nifi.parameter.ParameterParser;
 import org.apache.nifi.parameter.ParameterTokenList;
-import org.apache.nifi.registry.flow.VersionedParameter;
-import org.apache.nifi.registry.flow.VersionedParameterContext;
+import org.apache.nifi.flow.VersionedParameter;
+import org.apache.nifi.flow.VersionedParameterContext;
 import org.apache.nifi.web.NiFiServiceFacade;
 import org.apache.nifi.web.api.dto.ControllerServiceDTO;
 import org.apache.nifi.web.api.dto.FlowSnippetDTO;
@@ -165,6 +165,9 @@ public class AuthorizeParameterReference {
 
         boolean requiresAddition = false;
         for (final VersionedParameter versionedParameter : versionedParameterContext.getParameters()) {
+            if (versionedParameter == null) {
+                continue;
+            }
             final String versionedParameterName = versionedParameter.getName();
             if (!existingParameterNames.contains(versionedParameterName)) {
                 requiresAddition = true;

@@ -30,7 +30,6 @@ import org.apache.kudu.client.OperationResponse;
 import org.apache.kudu.client.PartialRow;
 import org.apache.kudu.client.RowError;
 import org.apache.kudu.client.SessionConfiguration;
-import org.apache.kudu.shaded.com.google.common.annotations.VisibleForTesting;
 import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.PropertyDescriptor.Builder;
@@ -50,6 +49,8 @@ import org.apache.nifi.security.krb.KerberosUser;
 import org.apache.nifi.serialization.record.DataType;
 import org.apache.nifi.serialization.record.Record;
 import org.apache.nifi.serialization.record.RecordFieldType;
+import org.apache.nifi.serialization.record.field.FieldConverter;
+import org.apache.nifi.serialization.record.field.ObjectTimestampFieldConverter;
 import org.apache.nifi.serialization.record.type.DecimalDataType;
 import org.apache.nifi.serialization.record.util.DataTypeUtils;
 import org.apache.nifi.util.StringUtils;
@@ -141,11 +142,11 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
 
-    private static final int DEFAULT_WORKER_COUNT = 2 * Runtime.getRuntime().availableProcessors();
+    private static final int DEFAULT_WORKER_COUNT = Runtime.getRuntime().availableProcessors();
     static final PropertyDescriptor WORKER_COUNT = new Builder()
             .name("worker-count")
             .displayName("Kudu Client Worker Count")
-            .description("The maximum number of worker threads handling Kudu client read and write operations. Defaults to the number of available processors multiplied by 2.")
+            .description("The maximum number of worker threads handling Kudu client read and write operations. Defaults to the number of available processors.")
             .required(true)
             .defaultValue(Integer.toString(DEFAULT_WORKER_COUNT))
             .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
@@ -160,6 +161,10 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
+
+    private static final FieldConverter<Object, Timestamp> TIMESTAMP_FIELD_CONVERTER = new ObjectTimestampFieldConverter();
+    /** Timestamp Pattern overrides default RecordFieldType.TIMESTAMP pattern of yyyy-MM-dd HH:mm:ss with optional microseconds */
+    private static final String MICROSECOND_TIMESTAMP_PATTERN = "yyyy-MM-dd HH:mm:ss[.SSSSSS]";
 
     private volatile KuduClient kuduClient;
     private final ReadWriteLock kuduClientReadWriteLock = new ReentrantReadWriteLock();
@@ -279,11 +284,12 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
         return new KerberosKeytabUser(principal, keytab) {
             @Override
             public synchronized void login() {
-                if (!isLoggedIn()) {
-                    super.login();
-
-                    createKuduClient(context);
+                if (isLoggedIn()) {
+                    return;
                 }
+
+                super.login();
+                createKuduClient(context);
             }
         };
     }
@@ -292,11 +298,12 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
         return new KerberosPasswordUser(principal, password) {
             @Override
             public synchronized void login() {
-                if (!isLoggedIn()) {
-                    super.login();
-
-                    createKuduClient(context);
+                if (isLoggedIn()) {
+                    return;
                 }
+
+                super.login();
+                createKuduClient(context);
             }
         };
     }
@@ -370,7 +377,6 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
         }
     }
 
-    @VisibleForTesting
     protected void buildPartialRow(Schema schema, PartialRow row, Record record, List<String> fieldNames, boolean ignoreNull, boolean lowercaseFields) {
         for (String recordFieldName : fieldNames) {
             String colName = recordFieldName;
@@ -398,6 +404,8 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
                 }
             } else {
                 Object value = record.getValue(recordFieldName);
+                final Optional<DataType> fieldDataType = record.getSchema().getDataType(recordFieldName);
+                final String dataTypeFormat = fieldDataType.map(DataType::getFormat).orElse(null);
                 switch (colType) {
                     case BOOL:
                         row.addBoolean(columnIndex, DataTypeUtils.toBoolean(value, recordFieldName));
@@ -415,16 +423,16 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
                         row.addLong(columnIndex,  DataTypeUtils.toLong(value, recordFieldName));
                         break;
                     case UNIXTIME_MICROS:
-                        DataType fieldType = record.getSchema().getDataType(recordFieldName).get();
-                        Timestamp timestamp = DataTypeUtils.toTimestamp(record.getValue(recordFieldName),
-                                () -> DataTypeUtils.getDateFormat(fieldType.getFormat()), recordFieldName);
+                        final Optional<DataType> optionalDataType = record.getSchema().getDataType(recordFieldName);
+                        final Optional<String> optionalPattern = getTimestampPattern(optionalDataType);
+                        final Timestamp timestamp = TIMESTAMP_FIELD_CONVERTER.convertField(value, optionalPattern, recordFieldName);
                         row.addTimestamp(columnIndex, timestamp);
                         break;
                     case STRING:
-                        row.addString(columnIndex, DataTypeUtils.toString(value, recordFieldName));
+                        row.addString(columnIndex, DataTypeUtils.toString(value, dataTypeFormat));
                         break;
                     case BINARY:
-                        row.addBinary(columnIndex, DataTypeUtils.toString(value, recordFieldName).getBytes());
+                        row.addBinary(columnIndex, DataTypeUtils.toString(value, dataTypeFormat).getBytes());
                         break;
                     case FLOAT:
                         row.addFloat(columnIndex, DataTypeUtils.toFloat(value, recordFieldName));
@@ -433,21 +441,39 @@ public abstract class AbstractKuduProcessor extends AbstractProcessor {
                         row.addDouble(columnIndex, DataTypeUtils.toDouble(value, recordFieldName));
                         break;
                     case DECIMAL:
-                        row.addDecimal(columnIndex, new BigDecimal(DataTypeUtils.toString(value, recordFieldName)));
+                        row.addDecimal(columnIndex, new BigDecimal(DataTypeUtils.toString(value, dataTypeFormat)));
                         break;
                     case VARCHAR:
-                        row.addVarchar(columnIndex, DataTypeUtils.toString(value, recordFieldName));
+                        row.addVarchar(columnIndex, DataTypeUtils.toString(value, dataTypeFormat));
                         break;
                     case DATE:
-                        final Optional<DataType> fieldDataType = record.getSchema().getDataType(recordFieldName);
-                        final String format = fieldDataType.isPresent() ? fieldDataType.get().getFormat() : RecordFieldType.DATE.getDefaultFormat();
-                        row.addDate(columnIndex, getDate(value, recordFieldName, format));
+                        final String dateFormat = dataTypeFormat == null ? RecordFieldType.DATE.getDefaultFormat() : dataTypeFormat;
+                        row.addDate(columnIndex, getDate(value, recordFieldName, dateFormat));
                         break;
                     default:
                         throw new IllegalStateException(String.format("unknown column type %s", colType));
                 }
             }
         }
+    }
+
+    /**
+     * Get Timestamp Pattern and override Timestamp Record Field pattern with optional microsecond pattern
+     *
+     * @param optionalDataType Optional Data Type
+     * @return Optional Timestamp Pattern
+     */
+    private Optional<String> getTimestampPattern(final Optional<DataType> optionalDataType) {
+        String pattern = null;
+        if (optionalDataType.isPresent()) {
+            final DataType dataType = optionalDataType.get();
+            if (RecordFieldType.TIMESTAMP == dataType.getFieldType()) {
+                pattern = MICROSECOND_TIMESTAMP_PATTERN;
+            } else {
+                pattern = dataType.getFormat();
+            }
+        }
+        return Optional.ofNullable(pattern);
     }
 
     /**

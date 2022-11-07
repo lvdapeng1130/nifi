@@ -33,17 +33,15 @@ import org.apache.nifi.minifi.commons.schema.ReportingSchema;
 import org.apache.nifi.minifi.commons.schema.common.StringUtil;
 import org.apache.nifi.minifi.commons.schema.exception.SchemaLoaderException;
 import org.apache.nifi.minifi.commons.schema.serialization.SchemaLoader;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.apache.nifi.util.StringUtils;
+import org.apache.nifi.xml.processing.parsers.DocumentProvider;
+import org.apache.nifi.xml.processing.parsers.StandardDocumentProvider;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
@@ -54,7 +52,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.StringBufferInputStream;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Collections;
@@ -68,27 +65,22 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class ConfigTransformerTest {
     public static final Map<String, Integer> PG_ELEMENT_ORDER_MAP = generateOrderMap(
             Arrays.asList("processor", "inputPort", "outputPort", "funnel", "processGroup", "remoteProcessGroup", "connection"));
     private XPathFactory xPathFactory;
-    private Document document;
     private Element config;
-    private DocumentBuilder documentBuilder;
 
-    @Rule
-    final public TemporaryFolder tempOutputFolder = new TemporaryFolder();
-
-    @Before
-    public void setup() throws ParserConfigurationException {
-        documentBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-        document = documentBuilder.newDocument();
+    @BeforeEach
+    public void setup() {
+        final DocumentProvider documentProvider = new StandardDocumentProvider();
+        final Document document = documentProvider.newDocument();
         config = document.createElement("config");
         xPathFactory = XPathFactory.newInstance();
     }
@@ -169,8 +161,6 @@ public class ConfigTransformerTest {
         try (InputStream pre216PropertiesStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-216/nifi.properties.before")) {
             pre216Properties.load(pre216PropertiesStream);
         }
-        pre216Properties.setProperty(ConfigTransformer.NIFI_VERSION_KEY, ConfigTransformer.NIFI_VERSION);
-
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try (InputStream configStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-216/config.yml")) {
             ConfigTransformer.writeNiFiProperties(SchemaLoader.loadConfigSchemaFromYaml(configStream), outputStream);
@@ -179,7 +169,7 @@ public class ConfigTransformerTest {
         properties.load(new ByteArrayInputStream(outputStream.toByteArray()));
 
         for (String name : pre216Properties.stringPropertyNames()) {
-            assertEquals("Property key " + name + " doesn't match.", pre216Properties.getProperty(name), properties.getProperty(name));
+            assertEquals(pre216Properties.getProperty(name), properties.getProperty(name), "Property key " + name + " doesn't match.");
         }
     }
 
@@ -189,8 +179,6 @@ public class ConfigTransformerTest {
         try (InputStream pre216PropertiesStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-216/nifi.properties.before")) {
             pre216Properties.load(pre216PropertiesStream);
         }
-        pre216Properties.setProperty(ConfigTransformer.NIFI_VERSION_KEY, ConfigTransformer.NIFI_VERSION);
-
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try (InputStream configStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-216/configOverrides.yml")) {
             ConfigSchema configSchema = SchemaLoader.loadConfigSchemaFromYaml(configStream);
@@ -204,7 +192,7 @@ public class ConfigTransformerTest {
         properties.load(new ByteArrayInputStream(outputStream.toByteArray()));
 
         for (String name : pre216Properties.stringPropertyNames()) {
-            assertEquals("Property key " + name + " doesn't match.", pre216Properties.getProperty(name), properties.getProperty(name));
+            assertEquals(pre216Properties.getProperty(name), properties.getProperty(name), "Property key " + name + " doesn't match.");
         }
     }
 
@@ -214,8 +202,6 @@ public class ConfigTransformerTest {
         try (InputStream pre216PropertiesStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-277/nifi.properties")) {
             initialProperties.load(pre216PropertiesStream);
         }
-        initialProperties.setProperty(ConfigTransformer.NIFI_VERSION_KEY, ConfigTransformer.NIFI_VERSION);
-
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try (InputStream configStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-277/config.yml")) {
             ConfigSchema configSchema = SchemaLoader.loadConfigSchemaFromYaml(configStream);
@@ -225,7 +211,7 @@ public class ConfigTransformerTest {
         properties.load(new ByteArrayInputStream(outputStream.toByteArray()));
 
         for (String name : initialProperties.stringPropertyNames()) {
-            assertEquals("Property key " + name + " doesn't match.", initialProperties.getProperty(name), properties.getProperty(name));
+            assertEquals(initialProperties.getProperty(name), properties.getProperty(name), "Property key " + name + " doesn't match.");
         }
     }
 
@@ -421,7 +407,7 @@ public class ConfigTransformerTest {
             File inputFile = new File("./src/test/resources/config-invalid.yml");
             ConfigTransformer.transformConfigFile(new FileInputStream(inputFile), "./target/", null);
             fail("Invalid configuration file was not detected.");
-        } catch (SchemaLoaderException e){
+        } catch (SchemaLoaderException e) {
             assertEquals("Provided YAML configuration is not a Map", e.getMessage());
         }
     }
@@ -432,7 +418,7 @@ public class ConfigTransformerTest {
             File inputFile = new File("./src/test/resources/config-malformed-field.yml");
             ConfigTransformer.transformConfigFile(new FileInputStream(inputFile), "./target/", null);
             fail("Invalid configuration file was not detected.");
-        } catch (InvalidConfigurationException e){
+        } catch (InvalidConfigurationException e) {
             assertEquals("Failed to transform config file due to:['threshold' in section 'Swap' because it is found but could not be parsed as a Number]", e.getMessage());
         }
     }
@@ -443,7 +429,7 @@ public class ConfigTransformerTest {
             File inputFile = new File("./src/test/resources/config-empty.yml");
             ConfigTransformer.transformConfigFile(new FileInputStream(inputFile), "./target/", null);
             fail("Invalid configuration file was not detected.");
-        } catch (SchemaLoaderException e){
+        } catch (SchemaLoaderException e) {
             assertEquals("Provided YAML configuration is not a Map", e.getMessage());
         }
     }
@@ -454,7 +440,7 @@ public class ConfigTransformerTest {
             File inputFile = new File("./src/test/resources/config-missing-required-field.yml");
             ConfigTransformer.transformConfigFile(new FileInputStream(inputFile), "./target/", null);
             fail("Invalid configuration file was not detected.");
-        } catch (InvalidConfigurationException e){
+        } catch (InvalidConfigurationException e) {
             assertEquals("Failed to transform config file due to:['class' in section 'Processors' because it was not found and it is required]", e.getMessage());
         }
     }
@@ -465,7 +451,7 @@ public class ConfigTransformerTest {
             File inputFile = new File("./src/test/resources/config-multiple-problems.yml");
             ConfigTransformer.transformConfigFile(new FileInputStream(inputFile), "./target/", null);
             fail("Invalid configuration file was not detected.");
-        } catch (InvalidConfigurationException e){
+        } catch (InvalidConfigurationException e) {
             assertEquals("Failed to transform config file due to:['class' in section 'Processors' because it was not found and it is required], " +
                     "['scheduling strategy' in section 'Provenance Reporting' because it is not a valid scheduling strategy], " +
                     "['source name' in section 'Connections' because it was not found and it is required]", e.getMessage());
@@ -490,11 +476,11 @@ public class ConfigTransformerTest {
         assertTrue(flowXml.exists());
         assertTrue(flowXml.canRead());
 
-        String flow = loadFlowXML(new FileInputStream(flowXml));
-
-        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-        DocumentBuilder db = dbf.newDocumentBuilder();
-        Document xml = db.parse(new StringBufferInputStream(flow));
+        final DocumentProvider documentProvider = new StandardDocumentProvider();
+        final Document xml;
+        try (final InputStream inputStream = new GZIPInputStream(new FileInputStream(flowXml))) {
+            xml = documentProvider.parse(inputStream);
+        }
 
         XPath xPath = XPathFactory.newInstance().newXPath();
         String result = xPath.evaluate("/flowController/rootGroup/processor/property[name = \"SSL Context Service\"]/value/text()", xml);
@@ -510,7 +496,8 @@ public class ConfigTransformerTest {
 
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         ConfigTransformer.writeFlowXmlFile(configSchema, outputStream);
-        Document document = documentBuilder.parse(new ByteArrayInputStream(outputStream.toByteArray()));
+        final DocumentProvider documentProvider = new StandardDocumentProvider();
+        Document document = documentProvider.parse(new ByteArrayInputStream(outputStream.toByteArray()));
 
         testProcessGroup((Element) xPathFactory.newXPath().evaluate("flowController/rootGroup", document, XPathConstants.NODE), configSchema.getProcessGroupSchema());
         testReportingTasks((Element) xPathFactory.newXPath().evaluate("flowController/reportingTasks", document, XPathConstants.NODE), configSchema.getReportingTasksSchema());
@@ -699,8 +686,6 @@ public class ConfigTransformerTest {
         try (InputStream pre216PropertiesStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-245/nifi.properties.before")) {
             pre216Properties.load(pre216PropertiesStream);
         }
-        pre216Properties.setProperty(ConfigTransformer.NIFI_VERSION_KEY, ConfigTransformer.NIFI_VERSION);
-
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try (InputStream configStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("MINIFI-245/config.yml")) {
             ConfigTransformer.writeNiFiProperties(SchemaLoader.loadConfigSchemaFromYaml(configStream), outputStream);
@@ -710,10 +695,10 @@ public class ConfigTransformerTest {
 
         for (String name : pre216Properties.stringPropertyNames()) {
             // Verify the Content Repo property was overridden
-            if("nifi.content.repository.implementation".equals(name)) {
-                assertNotEquals("Property key " + name + " was not overridden.", pre216Properties.getProperty(name), properties.getProperty(name));
+            if ("nifi.content.repository.implementation".equals(name)) {
+                assertNotEquals(pre216Properties.getProperty(name), properties.getProperty(name), "Property key " + name + " was not overridden.");
             } else {
-                assertEquals("Property key " + name + " doesn't match.", pre216Properties.getProperty(name), properties.getProperty(name));
+                assertEquals(pre216Properties.getProperty(name), properties.getProperty(name), "Property key " + name + " doesn't match.");
             }
         }
     }
@@ -724,8 +709,6 @@ public class ConfigTransformerTest {
         try (InputStream pre216PropertiesStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("NIFI-8753/nifi.properties.before")) {
             pre216Properties.load(pre216PropertiesStream);
         }
-        pre216Properties.setProperty(ConfigTransformer.NIFI_VERSION_KEY, ConfigTransformer.NIFI_VERSION);
-
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try (InputStream configStream = ConfigTransformerTest.class.getClassLoader().getResourceAsStream("NIFI-8753/config.yml")) {
             ConfigTransformer.writeNiFiProperties(SchemaLoader.loadConfigSchemaFromYaml(configStream), outputStream);
@@ -735,10 +718,10 @@ public class ConfigTransformerTest {
 
         for (String name : pre216Properties.stringPropertyNames()) {
             // Verify the Content Repo property was overridden
-            if("nifi.flowfile.repository.implementation".equals(name)) {
-                assertNotEquals("Property key " + name + " was not overridden.", pre216Properties.getProperty(name), properties.getProperty(name));
+            if ("nifi.flowfile.repository.implementation".equals(name)) {
+                assertNotEquals(pre216Properties.getProperty(name), properties.getProperty(name), "Property key " + name + " was not overridden.");
             } else {
-                assertEquals("Property key " + name + " doesn't match.", pre216Properties.getProperty(name), properties.getProperty(name));
+                assertEquals(pre216Properties.getProperty(name), properties.getProperty(name), "Property key " + name + " doesn't match.");
             }
         }
     }
@@ -751,7 +734,8 @@ public class ConfigTransformerTest {
         }
         final Properties properties = new Properties();
         properties.load(new ByteArrayInputStream(outputStream.toByteArray()));
-        assertEquals("", properties.getProperty("nifi.sensitive.props.key"));
+        // The property should not be empty/null as it is auto-generated when missing
+        assertTrue(StringUtils.isNotEmpty(properties.getProperty("nifi.sensitive.props.key")));
     }
 
     private String getText(Element element, String path) throws XPathExpressionException {
@@ -780,7 +764,7 @@ public class ConfigTransformerTest {
             if (index != null) {
                 if (elementOrderList > index) {
                     fail("Found " + nodeName + " after " + lastOrderedElementName + "; expected all " + nodeName + " elements to come before the following elements: " + orderMap.entrySet().stream()
-                            .filter(e -> e.getValue() > index ).sorted(Comparator.comparingInt(e -> e.getValue())).map(e -> e.getKey()).collect(Collectors.joining(", ")));
+                            .filter(e -> e.getValue() > index).sorted(Comparator.comparingInt(Map.Entry::getValue)).map(Map.Entry::getKey).collect(Collectors.joining(", ")));
                 }
                 lastOrderedElementName = nodeName;
                 elementOrderList = index;
@@ -794,18 +778,5 @@ public class ConfigTransformerTest {
             bootstrapProperties.load(fis);
         }
         return bootstrapProperties;
-    }
-
-    public static String loadFlowXML(InputStream compressedData) throws IOException {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        GZIPInputStream gzipInputStream = new GZIPInputStream(compressedData);
-
-        byte[] buffer = new byte[1024];
-        int len;
-        while ((len = gzipInputStream.read(buffer)) != -1) {
-            byteArrayOutputStream.write(buffer, 0, len);
-        }
-
-        return byteArrayOutputStream.toString();
     }
 }

@@ -104,8 +104,8 @@ public class ControllerServiceResource extends ApplicationResource {
 
     private static final Logger logger = LoggerFactory.getLogger(ControllerServiceResource.class);
     private static final String VERIFICATION_REQUEST_TYPE = "verification-request";
-    private RequestManager<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> updateRequestManager =
-        new AsyncRequestManager<>(100, TimeUnit.MINUTES.toMillis(1L), "Verify Controller Service Config Thread");
+    private RequestManager<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> configVerificationRequestManager =
+            new AsyncRequestManager<>(100, TimeUnit.MINUTES.toMillis(1L), "Verify Controller Service Config Thread");
 
     private NiFiServiceFacade serviceFacade;
     private Authorizer authorizer;
@@ -178,7 +178,9 @@ public class ControllerServiceResource extends ApplicationResource {
             response = ControllerServiceEntity.class,
             authorizations = {
                     @Authorization(value = "Read - /controller-services/{uuid}")
-            }
+            },
+            notes = "If the uiOnly query parameter is provided with a value of true, the returned entity may only contain fields that are necessary for rendering the NiFi User Interface. As such, " +
+                "the selected fields may change at any time, even during incremental releases, without warning. As a result, this parameter should not be provided by any client other than the UI."
     )
     @ApiResponses(
             value = {
@@ -194,7 +196,8 @@ public class ControllerServiceResource extends ApplicationResource {
                     value = "The controller service id.",
                     required = true
             )
-            @PathParam("id") final String id) {
+            @PathParam("id") final String id,
+            @QueryParam("uiOnly") @DefaultValue("false") final boolean uiOnly) {
 
         if (isReplicateRequest()) {
             return replicate(HttpMethod.GET);
@@ -208,10 +211,14 @@ public class ControllerServiceResource extends ApplicationResource {
 
         // get the controller service
         final ControllerServiceEntity entity = serviceFacade.getControllerService(id);
+        if (uiOnly) {
+            stripNonUiRelevantFields(entity);
+        }
         populateRemainingControllerServiceEntityContent(entity);
 
         return generateOkResponse(entity).build();
     }
+
 
     /**
      * Returns the descriptor for the specified property.
@@ -250,7 +257,13 @@ public class ControllerServiceResource extends ApplicationResource {
                     value = "The property name to return the descriptor for.",
                     required = true
             )
-            @QueryParam("propertyName") final String propertyName) {
+            @QueryParam("propertyName") final String propertyName,
+            @ApiParam(
+                    value = "Property Descriptor requested sensitive status",
+                    defaultValue = "false"
+            )
+            @QueryParam("sensitive") final boolean sensitive
+    ) {
 
         // ensure the property name is specified
         if (propertyName == null) {
@@ -268,7 +281,7 @@ public class ControllerServiceResource extends ApplicationResource {
         });
 
         // get the property descriptor
-        final PropertyDescriptorDTO descriptor = serviceFacade.getControllerServicePropertyDescriptor(id, propertyName);
+        final PropertyDescriptorDTO descriptor = serviceFacade.getControllerServicePropertyDescriptor(id, propertyName, sensitive);
 
         // generate the response entity
         final PropertyDescriptorEntity entity = new PropertyDescriptorEntity();
@@ -575,6 +588,10 @@ public class ControllerServiceResource extends ApplicationResource {
                     final ControllerServiceReferencingComponentsEntity entity = serviceFacade.updateControllerServiceReferencingComponents(
                             referencingRevisions, updateReferenceRequest.getId(), scheduledState, controllerServiceState);
 
+                    if (updateReferenceRequest.getUiOnly() == Boolean.TRUE) {
+                        entity.getControllerServiceReferencingComponents().forEach(this::stripNonUiRelevantFields);
+                    }
+
                     return generateOkResponse(entity).build();
                 }
         );
@@ -838,6 +855,10 @@ public class ControllerServiceResource extends ApplicationResource {
                     final ControllerServiceEntity entity = serviceFacade.updateControllerService(revision, createDTOWithDesiredRunStatus(id, runStatusEntity.getState()));
                     populateRemainingControllerServiceEntityContent(entity);
 
+                    if (runStatusEntity.getUiOnly() == Boolean.TRUE) {
+                        stripNonUiRelevantFields(entity);
+                    }
+
                     return generateOkResponse(entity).build();
                 }
         );
@@ -1002,7 +1023,7 @@ public class ControllerServiceResource extends ApplicationResource {
 
         // request manager will ensure that the current is the user that submitted this request
         final AsynchronousWebRequest<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> asyncRequest =
-            updateRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
+                configVerificationRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
 
         final VerifyConfigRequestEntity updateRequestEntity = createVerifyControllerServiceConfigRequestEntity(asyncRequest, requestId);
         return generateOkResponse(updateRequestEntity).build();
@@ -1029,7 +1050,7 @@ public class ControllerServiceResource extends ApplicationResource {
         @ApiResponse(code = 404, message = "The specified resource could not be found."),
         @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
     })
-    public Response deleteValidationRequest(
+    public Response deleteVerificationRequest(
         @ApiParam("The ID of the Controller Service") @PathParam("id") final String controllerServiceId,
         @ApiParam("The ID of the Verification Request") @PathParam("requestId") final String requestId) {
 
@@ -1045,7 +1066,7 @@ public class ControllerServiceResource extends ApplicationResource {
         if (!twoPhaseRequest || executionPhase) {
             // request manager will ensure that the current is the user that submitted this request
             final AsynchronousWebRequest<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> asyncRequest =
-                updateRequestManager.removeRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
+                    configVerificationRequestManager.removeRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
 
             if (asyncRequest == null) {
                 throw new ResourceNotFoundException("Could not find request of type " + VERIFICATION_REQUEST_TYPE + " with ID " + requestId);
@@ -1061,7 +1082,7 @@ public class ControllerServiceResource extends ApplicationResource {
 
         if (isValidationPhase(httpServletRequest)) {
             // Perform authorization by attempting to get the request
-            updateRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
+            configVerificationRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
             return generateContinueResponse().build();
         } else if (isCancellationPhase(httpServletRequest)) {
             return generateOkResponse().build();
@@ -1094,7 +1115,7 @@ public class ControllerServiceResource extends ApplicationResource {
             }
         };
 
-        updateRequestManager.submitRequest(VERIFICATION_REQUEST_TYPE, requestId, request, updateTask);
+        configVerificationRequestManager.submitRequest(VERIFICATION_REQUEST_TYPE, requestId, request, updateTask);
 
         // Generate the response
         final VerifyConfigRequestEntity resultsEntity = createVerifyControllerServiceConfigRequestEntity(request, requestId);

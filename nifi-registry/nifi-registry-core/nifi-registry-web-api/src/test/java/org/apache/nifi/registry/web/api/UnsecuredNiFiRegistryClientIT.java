@@ -19,6 +19,9 @@ package org.apache.nifi.registry.web.api;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.nifi.flow.VersionedProcessGroup;
+import org.apache.nifi.flow.VersionedProcessor;
+import org.apache.nifi.flow.VersionedPropertyDescriptor;
 import org.apache.nifi.registry.authorization.CurrentUser;
 import org.apache.nifi.registry.authorization.Permissions;
 import org.apache.nifi.registry.bucket.Bucket;
@@ -46,13 +49,13 @@ import org.apache.nifi.registry.extension.bundle.BundleVersion;
 import org.apache.nifi.registry.extension.bundle.BundleVersionDependency;
 import org.apache.nifi.registry.extension.bundle.BundleVersionFilterParams;
 import org.apache.nifi.registry.extension.bundle.BundleVersionMetadata;
-import org.apache.nifi.registry.extension.component.ExtensionFilterParams;
-import org.apache.nifi.registry.extension.component.ExtensionMetadataContainer;
-import org.apache.nifi.registry.extension.component.TagCount;
-import org.apache.nifi.registry.extension.component.manifest.Extension;
-import org.apache.nifi.registry.extension.component.ExtensionMetadata;
-import org.apache.nifi.registry.extension.component.manifest.ExtensionType;
-import org.apache.nifi.registry.extension.component.manifest.ProvidedServiceAPI;
+import org.apache.nifi.extension.ExtensionFilterParams;
+import org.apache.nifi.extension.ExtensionMetadataContainer;
+import org.apache.nifi.extension.TagCount;
+import org.apache.nifi.extension.manifest.Extension;
+import org.apache.nifi.extension.ExtensionMetadata;
+import org.apache.nifi.extension.manifest.ExtensionType;
+import org.apache.nifi.extension.manifest.ProvidedServiceAPI;
 import org.apache.nifi.registry.extension.repo.ExtensionRepoArtifact;
 import org.apache.nifi.registry.extension.repo.ExtensionRepoBucket;
 import org.apache.nifi.registry.extension.repo.ExtensionRepoExtensionMetadata;
@@ -60,15 +63,13 @@ import org.apache.nifi.registry.extension.repo.ExtensionRepoGroup;
 import org.apache.nifi.registry.extension.repo.ExtensionRepoVersion;
 import org.apache.nifi.registry.extension.repo.ExtensionRepoVersionSummary;
 import org.apache.nifi.registry.field.Fields;
-import org.apache.nifi.registry.flow.ExternalControllerServiceReference;
+import org.apache.nifi.flow.ExternalControllerServiceReference;
 import org.apache.nifi.registry.flow.VersionedFlow;
 import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
 import org.apache.nifi.registry.flow.VersionedFlowSnapshotMetadata;
-import org.apache.nifi.registry.flow.VersionedParameter;
-import org.apache.nifi.registry.flow.VersionedParameterContext;
-import org.apache.nifi.flow.VersionedProcessGroup;
-import org.apache.nifi.flow.VersionedProcessor;
-import org.apache.nifi.flow.VersionedPropertyDescriptor;
+import org.apache.nifi.flow.VersionedParameter;
+import org.apache.nifi.flow.VersionedParameterContext;
+import org.apache.nifi.flow.ParameterProviderReference;
 import org.apache.nifi.registry.revision.entity.RevisionInfo;
 import org.apache.nifi.registry.util.FileUtils;
 import org.bouncycastle.util.encoders.Hex;
@@ -878,6 +879,15 @@ public class UnsecuredNiFiRegistryClientIT extends UnsecuredITBase {
         serviceReference.setName("External Service 1");
         serviceReference.setIdentifier(UUID.randomUUID().toString());
 
+        final ParameterProviderReference parameterProviderReference = new ParameterProviderReference();
+        parameterProviderReference.setIdentifier("parameter-provider");
+        parameterProviderReference.setType("com.test.TestParameterProvider");
+        parameterProviderReference.setName("provider");
+        parameterProviderReference.setBundle(new org.apache.nifi.flow.Bundle("group", "artifact", "version"));
+
+        final Map<String, ParameterProviderReference> parameterProviderReferences = new HashMap<>();
+        parameterProviderReferences.put(parameterProviderReference.getIdentifier(), parameterProviderReference);
+
         final Map<String,ExternalControllerServiceReference> serviceReferences = new HashMap<>();
         serviceReferences.put(serviceReference.getIdentifier(), serviceReference);
 
@@ -886,6 +896,7 @@ public class UnsecuredNiFiRegistryClientIT extends UnsecuredITBase {
         snapshot.setFlowEncodingVersion("2.0.0");
         snapshot.setParameterContexts(contexts);
         snapshot.setExternalControllerServices(serviceReferences);
+        snapshot.setParameterProviders(parameterProviderReferences);
 
         final VersionedFlowSnapshot createdSnapshot = client.getFlowSnapshotClient().create(snapshot);
         assertNotNull(createdSnapshot);
@@ -895,6 +906,7 @@ public class UnsecuredNiFiRegistryClientIT extends UnsecuredITBase {
         assertEquals(snapshot.getFlowEncodingVersion(), createdSnapshot.getFlowEncodingVersion());
         assertEquals(1, createdSnapshot.getParameterContexts().size());
         assertEquals(1, createdSnapshot.getExternalControllerServices().size());
+        assertEquals(1, createdSnapshot.getParameterProviders().size());
 
         // Retrieve the snapshot
         final VersionedFlowSnapshot retrievedSnapshot = client.getFlowSnapshotClient().get(
@@ -907,6 +919,7 @@ public class UnsecuredNiFiRegistryClientIT extends UnsecuredITBase {
         assertEquals(snapshot.getFlowEncodingVersion(), retrievedSnapshot.getFlowEncodingVersion());
         assertEquals(1, retrievedSnapshot.getParameterContexts().size());
         assertEquals(1, retrievedSnapshot.getExternalControllerServices().size());
+        assertEquals(1, retrievedSnapshot.getParameterProviders().size());
     }
 
     private void checkExtensionMetadata(Collection<ExtensionMetadata> extensions) {

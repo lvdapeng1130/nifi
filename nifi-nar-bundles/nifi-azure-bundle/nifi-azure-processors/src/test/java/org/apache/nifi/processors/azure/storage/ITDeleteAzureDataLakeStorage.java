@@ -22,8 +22,9 @@ import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import org.apache.nifi.processor.Processor;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.provenance.ProvenanceEventType;
+import org.apache.nifi.reporting.InitializationException;
 import org.apache.nifi.util.MockFlowFile;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,9 +32,9 @@ import java.util.Map;
 
 import static org.apache.nifi.processors.azure.storage.DeleteAzureDataLakeStorage.FS_TYPE_DIRECTORY;
 import static org.apache.nifi.processors.azure.storage.DeleteAzureDataLakeStorage.FS_TYPE_FILE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ITDeleteAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
 
@@ -51,6 +52,23 @@ public class ITDeleteAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT
         String inputFlowFileContent = "InputFlowFileContent";
 
         createDirectoryAndUploadFile(directory, filename, fileContent);
+
+        // WHEN
+        // THEN
+        testSuccessfulDelete(fileSystemName, directory, null, inputFlowFileContent, inputFlowFileContent);
+    }
+
+    @Test
+    public void testDeleteDirectoryWithFilesUsingProxyConfigurationService() throws InitializationException {
+        // GIVEN
+        String directory = "TestDirectory";
+        String filename = "testFile.txt";
+        String fileContent = "AzureFileContent";
+        String inputFlowFileContent = "InputFlowFileContent";
+
+        createDirectoryAndUploadFile(directory, filename, fileContent);
+
+        configureProxyService();
 
         // WHEN
         // THEN

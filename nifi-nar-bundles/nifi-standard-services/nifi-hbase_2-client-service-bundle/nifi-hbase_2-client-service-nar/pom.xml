@@ -23,7 +23,6 @@
     </parent>
 
     <artifactId>nifi-hbase_2-client-service-nar</artifactId>
-    <version>1.18.0</version>
     <packaging>nar</packaging>
     <properties>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -43,5 +42,4 @@
             <version>1.18.0</version>
         </dependency>
     </dependencies>
-
 </project>

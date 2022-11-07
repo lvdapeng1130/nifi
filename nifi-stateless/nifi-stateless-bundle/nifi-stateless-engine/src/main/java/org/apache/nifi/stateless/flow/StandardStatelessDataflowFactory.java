@@ -20,6 +20,7 @@ package org.apache.nifi.stateless.flow;
 import org.apache.nifi.components.state.StatelessStateManagerProvider;
 import org.apache.nifi.controller.kerberos.KerberosConfig;
 import org.apache.nifi.controller.repository.ContentRepository;
+import org.apache.nifi.controller.repository.ContentRepositoryContext;
 import org.apache.nifi.controller.repository.CounterRepository;
 import org.apache.nifi.controller.repository.FlowFileEventRepository;
 import org.apache.nifi.controller.repository.FlowFileRepository;
@@ -33,6 +34,7 @@ import org.apache.nifi.controller.service.StandardControllerServiceProvider;
 import org.apache.nifi.encrypt.PropertyEncryptionMethod;
 import org.apache.nifi.encrypt.PropertyEncryptor;
 import org.apache.nifi.encrypt.PropertyEncryptorBuilder;
+import org.apache.nifi.events.BulletinFactory;
 import org.apache.nifi.events.EventReporter;
 import org.apache.nifi.events.VolatileBulletinRepository;
 import org.apache.nifi.extensions.ExtensionClient;
@@ -47,10 +49,8 @@ import org.apache.nifi.parameter.StandardParameterContextManager;
 import org.apache.nifi.provenance.IdentifierLookup;
 import org.apache.nifi.provenance.ProvenanceRepository;
 import org.apache.nifi.registry.VariableRegistry;
-import org.apache.nifi.registry.flow.FlowRegistryClient;
 import org.apache.nifi.registry.flow.InMemoryFlowRegistry;
-import org.apache.nifi.registry.flow.StandardFlowRegistryClient;
-import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
+import org.apache.nifi.reporting.Bulletin;
 import org.apache.nifi.reporting.BulletinRepository;
 import org.apache.nifi.stateless.bootstrap.ExtensionDiscovery;
 import org.apache.nifi.stateless.config.ExtensionClientDefinition;
@@ -82,18 +82,18 @@ import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
-public class StandardStatelessDataflowFactory implements StatelessDataflowFactory<VersionedFlowSnapshot> {
+public class StandardStatelessDataflowFactory implements StatelessDataflowFactory {
     private static final Logger logger = LoggerFactory.getLogger(StandardStatelessDataflowFactory.class);
 
-    @Override
-    public StatelessDataflow createDataflow(final StatelessEngineConfiguration engineConfiguration, final DataflowDefinition<VersionedFlowSnapshot> dataflowDefinition)
+
+    public StatelessDataflow createDataflow(final StatelessEngineConfiguration engineConfiguration, final DataflowDefinition dataflowDefinition,
+                                            final ClassLoader extensionRootClassLoader)
                     throws IOException, StatelessConfigurationException {
         final long start = System.currentTimeMillis();
-
-        final VersionedFlowSnapshot flowSnapshot = dataflowDefinition.getFlowSnapshot();
 
         ProvenanceRepository provenanceRepo = null;
         ContentRepository contentRepo = null;
@@ -109,14 +109,9 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
                 throw new IOException("Working Directory " + narExpansionDirectory + " does not exist and could not be created");
             }
 
-            final InMemoryFlowRegistry flowRegistry = new InMemoryFlowRegistry();
-            flowRegistry.addFlowSnapshot(flowSnapshot);
-            final FlowRegistryClient flowRegistryClient = new StandardFlowRegistryClient();
-            flowRegistryClient.addFlowRegistry(flowRegistry);
-
             final NarClassLoaders narClassLoaders = new NarClassLoaders();
             final File extensionsWorkingDir = new File(narExpansionDirectory, "extensions");
-            final ClassLoader systemClassLoader = createSystemClassLoader(engineConfiguration.getNarDirectory());
+            final ClassLoader systemClassLoader = createSystemClassLoader(engineConfiguration.getNarDirectory(), extensionRootClassLoader);
             final ExtensionDiscoveringManager extensionManager = ExtensionDiscovery.discover(extensionsWorkingDir, systemClassLoader, narClassLoaders, engineConfiguration.isLogExtensionDiscovery());
 
             flowFileEventRepo = new RingBufferEventRepository(5);
@@ -142,8 +137,7 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
                 extensionClients.add(extensionClient);
             }
 
-            final ExtensionRepository extensionRepository = new FileSystemExtensionRepository(extensionManager, engineConfiguration.getExtensionsDirectory(),
-                engineConfiguration.getReadOnlyExtensionsDirectories(), engineConfiguration.getWorkingDirectory(), narClassLoaders, extensionClients);
+            final ExtensionRepository extensionRepository = new FileSystemExtensionRepository(extensionManager, engineConfiguration, narClassLoaders, extensionClients);
             extensionRepository.initialize();
 
             final VariableRegistry variableRegistry = VariableRegistry.EMPTY_REGISTRY;
@@ -181,22 +175,25 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
                 System.setProperty("java.security.krb5.conf", krb5File.getAbsolutePath());
             }
 
-            final StatelessEngine<VersionedFlowSnapshot> statelessEngine = new StandardStatelessEngine.Builder()
-                .bulletinRepository(bulletinRepository)
-                .encryptor(lazyInitializedEncryptor)
-                .extensionManager(extensionManager)
-                .flowRegistryClient(flowRegistryClient)
-                .stateManagerProvider(stateManagerProvider)
-                .variableRegistry(variableRegistry)
-                .processScheduler(processScheduler)
-                .kerberosConfiguration(kerberosConfig)
-                .flowFileEventRepository(flowFileEventRepo)
-                .provenanceRepository(provenanceRepo)
-                .extensionRepository(extensionRepository)
-                .counterRepository(counterRepo)
-                .build();
+            final StatelessEngine statelessEngine = new StandardStatelessEngine.Builder()
+                    .bulletinRepository(bulletinRepository)
+                    .encryptor(lazyInitializedEncryptor)
+                    .extensionManager(extensionManager)
+                    .stateManagerProvider(stateManagerProvider)
+                    .variableRegistry(variableRegistry)
+                    .processScheduler(processScheduler)
+                    .kerberosConfiguration(kerberosConfig)
+                    .flowFileEventRepository(flowFileEventRepo)
+                    .provenanceRepository(provenanceRepo)
+                    .extensionRepository(extensionRepository)
+                    .counterRepository(counterRepo)
+                    .statusTaskInterval(engineConfiguration.getStatusTaskInterval())
+                    .build();
 
-            final StatelessFlowManager flowManager = new StatelessFlowManager(counterRepo,flowFileEventRepo, parameterContextManager, statelessEngine, () -> true, sslContext, bulletinRepository);
+            final StatelessFlowManager flowManager = new StatelessFlowManager(flowFileEventRepo, parameterContextManager, statelessEngine, () -> true, sslContext, bulletinRepository);
+            flowManager.createFlowRegistryClient(InMemoryFlowRegistry.class.getTypeName(), "in-memory-flow-registry", null, Collections.emptySet(), true, true, null);
+            ((InMemoryFlowRegistry) flowManager.getFlowRegistryClient("in-memory-flow-registry").getComponent()).addFlowSnapshot(dataflowDefinition.getVersionedExternalFlow());
+
             final ControllerServiceProvider controllerServiceProvider = new StandardControllerServiceProvider(processScheduler, bulletinRepository, flowManager, extensionManager);
 
             final ProcessContextFactory rawProcessContextFactory = new StatelessProcessContextFactory(controllerServiceProvider, lazyInitializedEncryptor, stateManagerProvider);
@@ -215,7 +212,21 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
             // Initialize components. This is generally needed because of the interdependencies between the components.
             // There are some circular dependencies that are resolved by passing objects via initialization rather than by providing to the constructors.
             final ResourceClaimManager resourceClaimManager = new StandardResourceClaimManager();
-            contentRepo.initialize(resourceClaimManager);
+            final EventReporter eventReporter = (severity, category, message) -> {
+                final Bulletin bulletin = BulletinFactory.createBulletin(category, severity.name(), message);
+                bulletinRepository.addBulletin(bulletin);
+            };
+            contentRepo.initialize(new ContentRepositoryContext() {
+                @Override
+                public ResourceClaimManager getResourceClaimManager() {
+                    return resourceClaimManager;
+                }
+
+                @Override
+                public EventReporter getEventReporter() {
+                    return eventReporter;
+                }
+            });
             flowFileRepo.initialize(resourceClaimManager);
             flowManager.initialize(controllerServiceProvider);
 
@@ -289,17 +300,16 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
         return "nexus".equalsIgnoreCase(type.trim());
     }
 
-    private ClassLoader createSystemClassLoader(final File narDirectory) throws StatelessConfigurationException {
-        final ClassLoader systemClassLoader = StatelessDataflowFactory.class.getClassLoader();
+    private ClassLoader createSystemClassLoader(final File narDirectory, final ClassLoader extensionRootClassLoader) throws StatelessConfigurationException {
         final int javaMajorVersion = getJavaMajorVersion();
         if (javaMajorVersion >= 11) {
             // If running on Java 11 or greater, add the JAXB/activation/annotation libs to the classpath.
             // TODO: Once the minimum Java version requirement of NiFi is 11, this processing should be removed.
             // JAXB/activation/annotation will be added as an actual dependency via pom.xml.
-            return createJava11OrLaterSystemClassLoader(javaMajorVersion, narDirectory, systemClassLoader);
+            return createJava11OrLaterSystemClassLoader(javaMajorVersion, narDirectory, extensionRootClassLoader);
         }
 
-        return systemClassLoader;
+        return extensionRootClassLoader;
     }
 
     private ClassLoader createJava11OrLaterSystemClassLoader(final int javaMajorVersion, final File narDirectory, final ClassLoader parentClassLoader) throws StatelessConfigurationException {

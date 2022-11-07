@@ -37,5 +37,4 @@ language governing permissions and limitations under the License. -->
             <artifactId>nifi-evtx-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

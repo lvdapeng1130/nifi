@@ -41,5 +41,4 @@
             <artifactId>nifi-rethinkdb-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

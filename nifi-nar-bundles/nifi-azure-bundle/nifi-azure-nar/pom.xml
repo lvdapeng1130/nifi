@@ -44,6 +44,13 @@
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-azure-graph-authorizer</artifactId>
             <version>1.18.0</version>
+            <exclusions>
+                <!-- Exclude Guava provided in nifi-azure-services-api-nar -->
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -52,5 +59,4 @@
             <type>nar</type>
         </dependency>
     </dependencies>
-
 </project>

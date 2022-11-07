@@ -23,6 +23,7 @@ import org.apache.nifi.components.state.Scope;
 import org.apache.nifi.components.state.StateMap;
 import org.apache.nifi.connectable.Connection;
 import org.apache.nifi.connectable.Position;
+import org.apache.nifi.controller.BackoffMechanism;
 import org.apache.nifi.controller.FlowController;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.ScheduledState;
@@ -60,6 +61,7 @@ import org.slf4j.LoggerFactory;
 import java.net.URL;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -154,6 +156,10 @@ public class StandardProcessorDAO extends ComponentDAO implements ProcessorDAO {
             final Long runDurationMillis = config.getRunDurationMillis();
             final String bulletinLevel = config.getBulletinLevel();
             final Set<String> undefinedRelationshipsToTerminate = config.getAutoTerminatedRelationships();
+            final Integer retryCount = config.getRetryCount();
+            final Set<String> retriedRelationships = config.getRetriedRelationships();
+            final String backoffMechanism = config.getBackoffMechanism();
+            final String maxBackoffPeriod = config.getMaxBackoffPeriod();
 
             processor.pauseValidationTrigger(); // ensure that we don't trigger many validations to occur
             try {
@@ -175,7 +181,7 @@ public class StandardProcessorDAO extends ComponentDAO implements ProcessorDAO {
                     processor.setMaxConcurrentTasks(maxTasks);
                 }
                 if (isNotNull(schedulingPeriod)) {
-                    processor.setScheduldingPeriod(schedulingPeriod);
+                    processor.setSchedulingPeriod(schedulingPeriod);
                 }
                 if (isNotNull(penaltyDuration)) {
                     processor.setPenalizationPeriod(penaltyDuration);
@@ -193,7 +199,24 @@ public class StandardProcessorDAO extends ComponentDAO implements ProcessorDAO {
                     processor.setLossTolerant(config.isLossTolerant());
                 }
                 if (isNotNull(configProperties)) {
-                    processor.setProperties(configProperties);
+                    final Set<String> sensitiveDynamicPropertyNames = config.getSensitiveDynamicPropertyNames();
+                    processor.setProperties(configProperties, false,sensitiveDynamicPropertyNames == null ? Collections.emptySet() : sensitiveDynamicPropertyNames);
+                }
+
+                if (isNotNull(retryCount)) {
+                    processor.setRetryCount(retryCount);
+                }
+
+                if (isNotNull(retriedRelationships)) {
+                    processor.setRetriedRelationships(retriedRelationships);
+                }
+
+                if (isNotNull(backoffMechanism)) {
+                    processor.setBackoffMechanism(BackoffMechanism.valueOf(backoffMechanism));
+                }
+
+                if (isNotNull(maxBackoffPeriod)) {
+                    processor.setMaxBackoffPeriod(maxBackoffPeriod);
                 }
 
                 if (isNotNull(undefinedRelationshipsToTerminate)) {
@@ -285,22 +308,25 @@ public class StandardProcessorDAO extends ComponentDAO implements ProcessorDAO {
         }
 
         // validate the scheduling period based on the scheduling strategy
-        if (isNotNull(config.getSchedulingPeriod())) {
+        final String schedulingPeriod = config.getSchedulingPeriod();
+        final String evaluatedSchedulingPeriod = processorNode.evaluateParameters(schedulingPeriod);
+
+        if (isNotNull(schedulingPeriod) && isNotNull(evaluatedSchedulingPeriod)) {
             switch (schedulingStrategy) {
                 case TIMER_DRIVEN:
                 case PRIMARY_NODE_ONLY:
-                    final Matcher schedulingMatcher = FormatUtils.TIME_DURATION_PATTERN.matcher(config.getSchedulingPeriod());
+                    final Matcher schedulingMatcher = FormatUtils.TIME_DURATION_PATTERN.matcher(evaluatedSchedulingPeriod);
                     if (!schedulingMatcher.matches()) {
                         validationErrors.add("Scheduling period is not a valid time duration (ie 30 sec, 5 min)");
                     }
                     break;
                 case CRON_DRIVEN:
                     try {
-                        new CronExpression(config.getSchedulingPeriod());
+                        new CronExpression(evaluatedSchedulingPeriod);
                     } catch (final ParseException pe) {
-                        throw new IllegalArgumentException(String.format("Scheduling Period '%s' is not a valid cron expression: %s", config.getSchedulingPeriod(), pe.getMessage()));
+                        throw new IllegalArgumentException(String.format("Scheduling Period '%s' is not a valid cron expression: %s", schedulingPeriod, pe.getMessage()));
                     } catch (final Exception e) {
-                        throw new IllegalArgumentException("Scheduling Period is not a valid cron expression: " + config.getSchedulingPeriod());
+                        throw new IllegalArgumentException("Scheduling Period is not a valid cron expression: " + schedulingPeriod);
                     }
                     break;
             }
@@ -427,7 +453,11 @@ public class StandardProcessorDAO extends ComponentDAO implements ProcessorDAO {
                     configDTO.getSchedulingPeriod(),
                     configDTO.getSchedulingStrategy(),
                     configDTO.getExecutionNode(),
-                    configDTO.getYieldDuration())) {
+                    configDTO.getYieldDuration(),
+                    configDTO.getRetryCount(),
+                    configDTO.getBackoffMechanism(),
+                    configDTO.getMaxBackoffPeriod(),
+                    configDTO.getRetriedRelationships())) {
 
                 modificationRequest = true;
             }

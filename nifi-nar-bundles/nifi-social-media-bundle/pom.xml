@@ -29,5 +29,4 @@
         <module>nifi-twitter-processors</module>
         <module>nifi-social-media-nar</module>
     </modules>
-
 </project>

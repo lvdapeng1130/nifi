@@ -41,5 +41,4 @@
             <artifactId>nifi-html-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

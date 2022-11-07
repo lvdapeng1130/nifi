@@ -37,5 +37,4 @@
             <version>${cassandra.sdk.version}</version>
         </dependency>
     </dependencies>
-
 </project>

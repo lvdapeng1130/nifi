@@ -22,12 +22,26 @@ import org.apache.nifi.annotation.lifecycle.OnConfigurationRestored;
 import org.apache.nifi.authorization.resource.Authorizable;
 import org.apache.nifi.bundle.BundleCoordinate;
 import org.apache.nifi.components.state.StateManager;
-import org.apache.nifi.connectable.*;
-import org.apache.nifi.controller.*;
+import org.apache.nifi.connectable.Connectable;
+import org.apache.nifi.connectable.ConnectableType;
+import org.apache.nifi.connectable.Connection;
+import org.apache.nifi.connectable.Funnel;
+import org.apache.nifi.connectable.LocalPort;
+import org.apache.nifi.connectable.Port;
+import org.apache.nifi.connectable.StandardConnection;
+import org.apache.nifi.controller.ConfigurationContext;
+import org.apache.nifi.controller.ControllerService;
+import org.apache.nifi.controller.ParameterProviderNode;
+import org.apache.nifi.controller.ProcessScheduler;
+import org.apache.nifi.controller.ProcessorNode;
+import org.apache.nifi.controller.ReportingTaskNode;
+import org.apache.nifi.controller.StandardFunnel;
+import org.apache.nifi.controller.StandardProcessorNode;
 import org.apache.nifi.controller.exception.ComponentLifeCycleException;
 import org.apache.nifi.controller.exception.ProcessorInstantiationException;
 import org.apache.nifi.controller.flow.AbstractFlowManager;
 import org.apache.nifi.controller.flow.FlowManager;
+import org.apache.nifi.controller.flowrepository.FlowRepositoryClientInstantiationException;
 import org.apache.nifi.controller.label.Label;
 import org.apache.nifi.controller.label.StandardLabel;
 import org.apache.nifi.controller.queue.ConnectionEventListener;
@@ -35,7 +49,6 @@ import org.apache.nifi.controller.queue.FlowFileQueue;
 import org.apache.nifi.controller.queue.FlowFileQueueFactory;
 import org.apache.nifi.controller.queue.LoadBalanceStrategy;
 import org.apache.nifi.controller.reporting.ReportingTaskInstantiationException;
-import org.apache.nifi.controller.repository.CounterRepository;
 import org.apache.nifi.controller.repository.FlowFileEventRepository;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.StandardConfigurationContext;
@@ -43,17 +56,22 @@ import org.apache.nifi.flowfile.FlowFilePrioritizer;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.groups.RemoteProcessGroup;
 import org.apache.nifi.groups.StandardProcessGroup;
-import org.apache.nifi.logging.*;
+import org.apache.nifi.logging.ControllerServiceLogObserver;
+import org.apache.nifi.logging.FlowRegistryClientLogObserver;
+import org.apache.nifi.logging.LogLevel;
+import org.apache.nifi.logging.LogRepository;
+import org.apache.nifi.logging.LogRepositoryFactory;
+import org.apache.nifi.logging.ProcessorLogObserver;
+import org.apache.nifi.logging.ReportingTaskLogObserver;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.nar.NarCloseable;
 import org.apache.nifi.parameter.ParameterContextManager;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.StandardProcessContext;
-import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
+import org.apache.nifi.registry.flow.FlowRegistryClientNode;
 import org.apache.nifi.registry.variable.MutableVariableRegistry;
 import org.apache.nifi.remote.StandardRemoteProcessGroup;
 import org.apache.nifi.reporting.BulletinRepository;
-import org.apache.nifi.reporting.bo.KyCounter;
 import org.apache.nifi.stateless.queue.StatelessFlowFileQueue;
 import org.apache.nifi.util.ReflectionUtils;
 import org.apache.nifi.web.api.dto.FlowSnippetDTO;
@@ -62,7 +80,12 @@ import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
 import java.net.URL;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -71,19 +94,17 @@ import static java.util.Objects.requireNonNull;
 public class StatelessFlowManager extends AbstractFlowManager implements FlowManager {
     private static final Logger logger = LoggerFactory.getLogger(StatelessFlowManager.class);
 
-    private final StatelessEngine<VersionedFlowSnapshot> statelessEngine;
+    private final StatelessEngine statelessEngine;
     private final SSLContext sslContext;
-    private final CounterRepository counterRepo;
     private final BulletinRepository bulletinRepository;
 
-    public StatelessFlowManager(final CounterRepository counterRepo,final FlowFileEventRepository flowFileEventRepository, final ParameterContextManager parameterContextManager,
-                                final StatelessEngine<VersionedFlowSnapshot> statelessEngine, final BooleanSupplier flowInitializedCheck,
+    public StatelessFlowManager(final FlowFileEventRepository flowFileEventRepository, final ParameterContextManager parameterContextManager,
+                                final StatelessEngine statelessEngine, final BooleanSupplier flowInitializedCheck,
                                 final SSLContext sslContext, final BulletinRepository bulletinRepository) {
-        super(flowFileEventRepository, parameterContextManager, statelessEngine.getFlowRegistryClient(), flowInitializedCheck);
+        super(flowFileEventRepository, parameterContextManager, flowInitializedCheck);
 
         this.statelessEngine = statelessEngine;
         this.sslContext = sslContext;
-        this.counterRepo = counterRepo;
         this.bulletinRepository = bulletinRepository;
     }
 
@@ -137,7 +158,7 @@ public class StatelessFlowManager extends AbstractFlowManager implements FlowMan
 
     @Override
     public ProcessorNode createProcessor(final String type, final String id, final BundleCoordinate coordinate, final Set<URL> additionalUrls, final boolean firstTimeAdded,
-                                         final boolean registerLogObserver) {
+                                         final boolean registerLogObserver, final String classloaderIsolationKey) {
         logger.debug("Creating Processor of type {} with id {}", type, id);
 
         // make sure the first reference to LogRepository happens outside of a NarCloseable so that we use the framework's ClassLoader
@@ -210,8 +231,7 @@ public class StatelessFlowManager extends AbstractFlowManager implements FlowMan
             statelessEngine.getExtensionManager(),
             statelessEngine.getStateManagerProvider(),
             this,
-            statelessEngine.getFlowRegistryClient(),
-            statelessEngine.getReloadComponent(),
+                statelessEngine.getReloadComponent(),
             mutableVariableRegistry,
             new StatelessNodeTypeProvider(),
             null);
@@ -248,7 +268,7 @@ public class StatelessFlowManager extends AbstractFlowManager implements FlowMan
 
     @Override
     public ReportingTaskNode createReportingTask(final String type, final String id, final BundleCoordinate bundleCoordinate, final Set<URL> additionalUrls, final boolean firstTimeAdded,
-                                                 final boolean register) {
+                                                 final boolean register, final String classloaderIsolationKey) {
 
         if (type == null || id == null || bundleCoordinate == null) {
             throw new NullPointerException("Must supply type, id, and bundle coordinate in order to create Reporting Task. Provided arguments were type=" + type + ", id=" + id
@@ -299,6 +319,48 @@ public class StatelessFlowManager extends AbstractFlowManager implements FlowMan
     }
 
     @Override
+    public ParameterProviderNode createParameterProvider(final String type, final String id, final BundleCoordinate bundleCoordinate, final Set<URL> additionalUrls, final boolean firstTimeAdded,
+                                                         final boolean register) {
+
+        throw new UnsupportedOperationException("Parameter Providers are not supported in Stateless NiFi");
+    }
+
+    @Override
+    public FlowRegistryClientNode createFlowRegistryClient(final String type, final String id, final BundleCoordinate bundleCoordinate, final Set<URL> additionalUrls,
+                                                           final boolean firstTimeAdded, final boolean registerLogObserver, final String classloaderIsolationKey) {
+        final LogRepository logRepository = LogRepositoryFactory.getRepository(id);
+
+        final FlowRegistryClientNode clientNode;
+        try {
+            clientNode = new ComponentBuilder()
+                    .identifier(id)
+                    .type(type)
+                    .statelessEngine(statelessEngine)
+                    .additionalClassPathUrls(additionalUrls)
+                    .flowManager(this)
+                    .buildFlowRegistryClient();
+        } catch (final FlowRepositoryClientInstantiationException e) {
+            throw new IllegalStateException("Could not create Flow Registry Client of type " + type + " with ID " + id, e);
+        }
+
+        onFlowRegistryClientAdded(clientNode);
+        LogRepositoryFactory.getRepository(clientNode.getIdentifier()).setLogger(clientNode.getLogger());
+
+        if (registerLogObserver) {
+
+            // Register log observer to provide bulletins when reporting task logs anything at WARN level or above
+            logRepository.addObserver(StandardProcessorNode.BULLETIN_OBSERVER_ID, LogLevel.WARN, new FlowRegistryClientLogObserver(bulletinRepository, clientNode));
+        }
+
+        return clientNode;
+    }
+
+    @Override
+    public void removeFlowRegistryClientNode(FlowRegistryClientNode clientNode) {
+        throw new UnsupportedOperationException("Removing Flow Registry Client is not supported in Stateless NiFi");
+    }
+
+    @Override
     protected ExtensionManager getExtensionManager() {
         return statelessEngine.getExtensionManager();
     }
@@ -315,7 +377,7 @@ public class StatelessFlowManager extends AbstractFlowManager implements FlowMan
 
     @Override
     public ControllerServiceNode createControllerService(final String type, final String id, final BundleCoordinate bundleCoordinate, final Set<URL> additionalUrls,
-                                                         final boolean firstTimeAdded, final boolean registerLogObserver) {
+                                                         final boolean firstTimeAdded, final boolean registerLogObserver, final String classloaderIsolationKey) {
 
         logger.debug("Creating Controller Service of type {} with id {}", type, id);
         final LogRepository logRepository = LogRepositoryFactory.getRepository(id);
@@ -373,26 +435,6 @@ public class StatelessFlowManager extends AbstractFlowManager implements FlowMan
 
     @Override
     public void removeRootControllerService(final ControllerServiceNode service) {
-    }
-
-    @Override
-    public List<KyCounter> getKyCounters() {
-        final List<KyCounter> counters = new ArrayList<>();
-        for (final Counter counter : counterRepo.getCounters()) {
-            KyCounter kyCounter=new KyCounter(counter.getIdentifier(),counter.getContext(),counter.getName());
-            kyCounter.adjust(counter.getValue());
-            counters.add(kyCounter);
-        }
-
-        return counters;
-    }
-
-    @Override
-    public KyCounter resetKyCounter(String identifier) {
-        final Counter resetValue = counterRepo.resetCounter(identifier);
-        KyCounter kyCounter=new KyCounter(resetValue.getIdentifier(),resetValue.getContext(),resetValue.getName());
-        kyCounter.adjust(resetValue.getValue());
-        return kyCounter;
     }
 
     @Override

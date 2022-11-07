@@ -35,5 +35,4 @@
             <artifactId>nifi-ccda-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

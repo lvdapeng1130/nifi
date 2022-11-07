@@ -23,7 +23,6 @@
     </parent>
 
     <artifactId>nifi-hive_1_1-nar</artifactId>
-    <version>1.18.0</version>
     <packaging>nar</packaging>
     <properties>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -45,5 +44,4 @@
             <version>1.18.0</version>
         </dependency>
     </dependencies>
-
 </project>

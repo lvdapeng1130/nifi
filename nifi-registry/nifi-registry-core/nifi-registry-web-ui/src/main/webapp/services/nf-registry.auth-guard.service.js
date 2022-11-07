@@ -57,14 +57,13 @@ NfRegistryUsersAdministrationAuthGuard.prototype = {
         return new Promise((resolve) => {
             if (this.nfRegistryService.currentUser.resourcePermissions.tenants.canRead) {
                 resolve(true);
-                return true;
             }
 
             // Store the attempted URL for redirecting
             this.nfRegistryService.redirectUrl = url;
 
             // attempt Kerberos or OIDC authentication
-            this.nfRegistryApi.ticketExchange().subscribe(function (jwt) {
+            this.nfRegistryApi.ticketExchange().subscribe(function () {
                 self.nfRegistryApi.loadCurrentUser().subscribe(function (currentUser) {
                     // there is no anonymous access and we don't know this user - open the login page which handles login/registration/etc
                     if (currentUser.error) {
@@ -79,6 +78,11 @@ NfRegistryUsersAdministrationAuthGuard.prototype = {
                             // render the logout button if there is a token locally
                             if (self.nfStorage.getItem('jwt') !== null) {
                                 self.nfRegistryService.currentUser.canLogout = true;
+
+                                // Update Registry Configuration following successful login
+                                self.nfRegistryApi.getRegistryConfig().subscribe(function (registryConfig) {
+                                    self.nfRegistryService.registry.config = registryConfig;
+                                });
                             }
 
                             // redirect to explorer perspective if not admin
@@ -187,7 +191,7 @@ NfRegistryWorkflowsAdministrationAuthGuard.prototype = {
             this.nfRegistryService.redirectUrl = url;
 
             // attempt Kerberos or OIDC authentication
-            this.nfRegistryApi.ticketExchange().subscribe(function (jwt) {
+            this.nfRegistryApi.ticketExchange().subscribe(function () {
                 self.nfRegistryApi.loadCurrentUser().subscribe(function (currentUser) {
                     // there is no anonymous access and we don't know this user - open the login page which handles login/registration/etc
                     if (currentUser.error) {
@@ -202,6 +206,11 @@ NfRegistryWorkflowsAdministrationAuthGuard.prototype = {
                             // render the logout button if there is a token locally
                             if (self.nfStorage.getItem('jwt') !== null) {
                                 self.nfRegistryService.currentUser.canLogout = true;
+
+                                // Update Registry Configuration following successful login
+                                self.nfRegistryApi.getRegistryConfig().subscribe(function (registryConfig) {
+                                    self.nfRegistryService.registry.config = registryConfig;
+                                });
                             }
 
                             // redirect to explorer perspective if not admin
@@ -289,7 +298,7 @@ NfRegistryLoginAuthGuard.prototype = {
         return this.checkLogin(url);
     },
 
-    checkLogin: function (url) {
+    checkLogin: function () {
         var self = this;
         return new Promise((resolve) => {
             if (this.nfRegistryService.currentUser.anonymous) {
@@ -297,13 +306,18 @@ NfRegistryLoginAuthGuard.prototype = {
                 return;
             }
             // attempt Kerberos or OIDC authentication
-            this.nfRegistryApi.ticketExchange().subscribe(function (jwt) {
+            this.nfRegistryApi.ticketExchange().subscribe(function () {
                 self.nfRegistryApi.loadCurrentUser().subscribe(function (currentUser) {
                     self.nfRegistryService.currentUser = currentUser;
                     if (currentUser.anonymous === false) {
                         // render the logout button if there is a token locally
                         if (self.nfStorage.getItem('jwt') !== null) {
                             self.nfRegistryService.currentUser.canLogout = true;
+
+                            // Update Registry Configuration following successful login
+                            self.nfRegistryApi.getRegistryConfig().subscribe(function (registryConfig) {
+                                self.nfRegistryService.registry.config = registryConfig;
+                            });
                         }
                         self.nfRegistryService.currentUser.canActivateResourcesAuthGuard = true;
                         resolve(false);
@@ -368,7 +382,7 @@ NfRegistryResourcesAuthGuard.prototype = {
             this.nfRegistryService.redirectUrl = url;
 
             // attempt Kerberos or OIDC authentication
-            this.nfRegistryApi.ticketExchange().subscribe(function (jwt) {
+            this.nfRegistryApi.ticketExchange().subscribe(function () {
                 self.nfRegistryApi.loadCurrentUser().subscribe(function (currentUser) {
                     // there is no anonymous access and we don't know this user - open the login page which handles login/registration/etc
                     if (currentUser.error) {
@@ -383,6 +397,11 @@ NfRegistryResourcesAuthGuard.prototype = {
                             if (self.nfStorage.hasItem('jwt')) {
                                 self.nfRegistryService.currentUser.canLogout = true;
                                 self.nfRegistryService.currentUser.canActivateResourcesAuthGuard = true;
+
+                                // Update Registry Configuration following successful login
+                                self.nfRegistryApi.getRegistryConfig().subscribe(function (registryConfig) {
+                                    self.nfRegistryService.registry.config = registryConfig;
+                                });
                                 resolve(true);
                             } else {
                                 self.router.navigateByUrl('login');

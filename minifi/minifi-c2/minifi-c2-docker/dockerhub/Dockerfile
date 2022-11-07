@@ -17,15 +17,19 @@
 #
 
 FROM openjdk:8-jre-alpine
-MAINTAINER Apache MiNiFi <dev@nifi.apache.org>
+LABEL maintainer="Apache NiFi <dev@nifi.apache.org>"
+LABEL site="https://nifi.apache.org"
 
 ARG UID=1000
 ARG GID=50
-ARG MINIFI_C2_VERSION=0.6.0
+ARG MINIFI_C2_VERSION=1.17.0
+ARG MIRROR=https://archive.apache.org/dist
 
 ENV MINIFI_C2_BASE_DIR /opt/minifi-c2
-ENV MINIFI_C2_HOME $MINIFI_C2_BASE_DIR/minifi-c2-$MINIFI_C2_VERSION
-ENV MINIFI_C2_BINARY_URL https://archive.apache.org/dist/nifi/minifi/$MINIFI_C2_VERSION/minifi-c2-$MINIFI_C2_VERSION-bin.tar.gz
+ENV MINIFI_C2_HOME ${MINIFI_C2_BASE_DIR}/minifi-c2-${MINIFI_C2_VERSION}
+ENV MINIFI_C2_BINARY minifi-c2-${MINIFI_C2_VERSION}-bin.zip
+ENV MINIFI_C2_BINARY_PATH nifi/${MINIFI_C2_VERSION}/${MINIFI_C2_BINARY}
+ENV MINIFI_C2_BINARY_URL ${MIRROR}/${MINIFI_C2_BINARY_PATH}
 
 # Setup MiNiFi user
 RUN addgroup -g $GID c2 || groupmod -n c2 `getent group $GID | cut -d: -f1`
@@ -34,10 +38,10 @@ RUN mkdir -p $MINIFI_C2_HOME
 
 # Download, validate, and expand Apache MiNiFi C2 binary.
 RUN apk add curl \
-    && curl -fSL $MINIFI_C2_BINARY_URL -o $MINIFI_C2_BASE_DIR/minifi-c2-$MINIFI_C2_VERSION-bin.tar.gz \
-	&& echo "$(curl $MINIFI_C2_BINARY_URL.sha256) *$MINIFI_C2_BASE_DIR/minifi-c2-$MINIFI_C2_VERSION-bin.tar.gz" | sha256sum -c - \
-	&& tar -xvzf $MINIFI_C2_BASE_DIR/minifi-c2-$MINIFI_C2_VERSION-bin.tar.gz -C $MINIFI_C2_BASE_DIR \
-	&& rm $MINIFI_C2_BASE_DIR/minifi-c2-$MINIFI_C2_VERSION-bin.tar.gz
+    && curl -fSL $MINIFI_C2_BINARY_URL -o $MINIFI_C2_BASE_DIR/${MINIFI_C2_BINARY} \
+	&& echo "$(curl $MINIFI_C2_BINARY_URL.sha256) *$MINIFI_C2_BASE_DIR/${MINIFI_C2_BINARY}" | sha256sum -c - \
+	&& unzip $MINIFI_C2_BASE_DIR/${MINIFI_C2_BINARY} -d $MINIFI_C2_BASE_DIR \
+	&& rm $MINIFI_C2_BASE_DIR/${MINIFI_C2_BINARY}
 
 RUN chown -R c2:c2 $MINIFI_C2_HOME
 

@@ -17,11 +17,10 @@
 
 package org.apache.nifi.registry.flow.diff;
 
-import java.util.Objects;
-
-import org.apache.nifi.flow.ScheduledState;
 import org.apache.nifi.flow.VersionedComponent;
 import org.apache.nifi.flow.VersionedFlowCoordinates;
+
+import java.util.Objects;
 
 /**
  * Describes differences between flows as if the flows are two disparate flows that are being
@@ -37,19 +36,25 @@ public class StaticDifferenceDescriptor implements DifferenceDescriptor {
         switch (type) {
             case COMPONENT_ADDED:
                 description = String.format("%s with ID %s exists in %s but not in %s",
-                    componentB.getComponentType().getTypeName(), componentB.getIdentifier(), flowBName, flowAName);
+                    componentB.getComponentType().getTypeName(), getId(componentB), flowBName, flowAName);
                 break;
             case COMPONENT_REMOVED:
                 description = String.format("%s with ID %s exists in %s but not in %s",
-                    componentA.getComponentType().getTypeName(), componentA.getIdentifier(), flowAName, flowBName);
+                    componentA.getComponentType().getTypeName(), getId(componentA), flowAName, flowBName);
                 break;
             case PROPERTY_ADDED:
                 description = String.format("Property '%s' exists for %s with ID %s in %s but not in %s",
-                    fieldName, componentB.getComponentType().getTypeName(), componentB.getIdentifier(), flowBName, flowAName);
+                    fieldName, componentB.getComponentType().getTypeName(), getId(componentB), flowBName, flowAName);
                 break;
             case PROPERTY_REMOVED:
                 description = String.format("Property '%s' exists for %s with ID %s in %s but not in %s",
-                    fieldName, componentA.getComponentType().getTypeName(), componentA.getIdentifier(), flowAName, flowBName);
+                    fieldName, componentA.getComponentType().getTypeName(), getId(componentA), flowAName, flowBName);
+                break;
+            case PROPERTY_CHANGED:
+                description = String.format("Property '%s' for %s with ID %s is different", fieldName, componentA.getComponentType().getTypeName(), getId(componentA));
+                break;
+            case PROPERTY_SENSITIVITY_CHANGED:
+                description = String.format("Property '%s' for %s with ID %s has a different sensitive status", fieldName, componentA.getComponentType().getTypeName(), componentA.getIdentifier());
                 break;
             case PROPERTY_PARAMETERIZED:
                 description = String.format("Property '%s' is a parameter reference in %s but not in %s", fieldName, flowAName, flowBName);
@@ -58,19 +63,15 @@ public class StaticDifferenceDescriptor implements DifferenceDescriptor {
                 description = String.format("Property '%s' is a parameter reference in %s but not in %s", fieldName, flowBName, flowAName);
                 break;
             case SCHEDULED_STATE_CHANGED:
-                if (ScheduledState.DISABLED.equals(valueA)) {
-                    description = String.format("%s is disabled in %s but enabled in %s", componentA.getComponentType().getTypeName(), flowAName, flowBName);
-                } else {
-                    description = String.format("%s is enabled in %s but disabled in %s", componentA.getComponentType().getTypeName(), flowAName, flowBName);
-                }
+                description = String.format("%s %s has a Scheduled State of %s in %s but %s in %s", componentA.getComponentType(), getId(componentA), valueA, flowAName, valueB, flowBName);
                 break;
             case VARIABLE_ADDED:
                 description = String.format("Variable '%s' exists for Process Group with ID %s in %s but not in %s",
-                    fieldName, componentB.getIdentifier(), flowBName, flowAName);
+                    fieldName, getId(componentB), flowBName, flowAName);
                 break;
             case VARIABLE_REMOVED:
                 description = String.format("Variable '%s' exists for Process Group with ID %s in %s but not in %s",
-                    fieldName, componentA.getIdentifier(), flowAName, flowBName);
+                    fieldName, getId(componentA), flowAName, flowBName);
                 break;
             case VERSIONED_FLOW_COORDINATES_CHANGED:
                 if (valueA instanceof VersionedFlowCoordinates && valueB instanceof VersionedFlowCoordinates) {
@@ -87,12 +88,12 @@ public class StaticDifferenceDescriptor implements DifferenceDescriptor {
                 }
 
                 description = String.format("%s for %s with ID %s; flow '%s' has value %s; flow '%s' has value %s",
-                    type.getDescription(), componentA.getComponentType().getTypeName(), componentA.getIdentifier(),
+                    type.getDescription(), componentA.getComponentType().getTypeName(), getId(componentA),
                     flowAName, valueA, flowBName, valueB);
                 break;
             default:
                 description = String.format("%s for %s with ID %s; flow '%s' has value %s; flow '%s' has value %s",
-                    type.getDescription(), componentA.getComponentType().getTypeName(), componentA.getIdentifier(),
+                    type.getDescription(), componentA.getComponentType().getTypeName(), getId(componentA),
                     flowAName, valueA, flowBName, valueB);
                 break;
         }
@@ -100,4 +101,15 @@ public class StaticDifferenceDescriptor implements DifferenceDescriptor {
         return description;
     }
 
+    private String getId(final VersionedComponent component) {
+        if (component == null) {
+            return null;
+        }
+
+        if (component.getInstanceIdentifier() == null) {
+            return component.getIdentifier();
+        }
+
+        return component.getInstanceIdentifier();
+    }
 }

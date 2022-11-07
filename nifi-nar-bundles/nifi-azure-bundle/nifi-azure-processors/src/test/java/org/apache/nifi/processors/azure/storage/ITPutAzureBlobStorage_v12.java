@@ -18,7 +18,6 @@ package org.apache.nifi.processors.azure.storage;
 
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerClient;
-import com.google.common.collect.Sets;
 import org.apache.nifi.processor.Processor;
 import org.apache.nifi.processors.azure.storage.utils.AzureStorageUtils;
 import org.apache.nifi.provenance.ProvenanceEventRecord;
@@ -50,6 +49,15 @@ public class ITPutAzureBlobStorage_v12 extends AbstractAzureBlobStorage_v12IT {
 
     @Test
     public void testPutBlobWithSimpleName() throws Exception {
+        runProcessor(BLOB_DATA);
+
+        assertSuccess(getContainerName(), BLOB_NAME, BLOB_DATA);
+    }
+
+    @Test
+    public void testPutBlobWithSimpleNameUsingProxyConfigurationService() throws Exception {
+        configureProxyService();
+
         runProcessor(BLOB_DATA);
 
         assertSuccess(getContainerName(), BLOB_NAME, BLOB_DATA);
@@ -175,7 +183,7 @@ public class ITPutAzureBlobStorage_v12 extends AbstractAzureBlobStorage_v12IT {
     }
 
     private void assertProvenanceEvents() {
-        Set<ProvenanceEventType> expectedEventTypes = Sets.newHashSet(ProvenanceEventType.SEND);
+        Set<ProvenanceEventType> expectedEventTypes = Collections.singleton(ProvenanceEventType.SEND);
 
         Set<ProvenanceEventType> actualEventTypes = runner.getProvenanceEvents().stream()
                 .map(ProvenanceEventRecord::getEventType)

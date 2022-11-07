@@ -109,11 +109,11 @@
         urls: {
             api: '../nifi-api',
             accessConfig: '../nifi-api/access/config',
+            accessTokenExpiration: '../nifi-api/access/token/expiration',
             currentUser: '../nifi-api/flow/current-user',
             controllerBulletins: '../nifi-api/flow/controller/bulletins',
             kerberos: '../nifi-api/access/kerberos',
             oidc: '../nifi-api/access/oidc/exchange',
-            saml: '../nifi-api/access/saml/login/exchange',
             revision: '../nifi-api/flow/revision',
             banners: '../nifi-api/flow/banners'
         }
@@ -823,6 +823,22 @@
                         }
 
                         // default prevented in nf-universal-capture.js
+                    } else if (evt.keyCode === 27) {
+                        // esc
+                        var contextMenuVisible = $('#context-menu').is(':visible');
+                        // if context menu is visible, then hide it
+                        if (contextMenuVisible) {
+                            nfContextMenu.hide();
+                            return;
+                        }
+
+                        var cancellables = $('.cancellable');
+                        var isAnyCancellableVisible = cancellables.length
+                            && cancellables.toArray().some(function (c) { return $(c).is(':visible'); });
+                        // if no cancellable (modals, etc.) and context menu is visible, then leave current process group
+                        if (!isAnyCancellableVisible && !contextMenuVisible && nfCanvasUtils.getParentGroupId() !== null) {
+                            nfActions['leaveGroup']();
+                        }
                     }
                 }
             });
@@ -895,11 +911,17 @@
                             successfulAuthentication(jwt)
                         }).fail(function () {
                             $.ajax({
-                                type: 'POST',
-                                url: config.urls.saml,
-                                dataType: 'text'
-                            }).done(function (jwt) {
-                                successfulAuthentication(jwt)
+                                type: 'GET',
+                                url: config.urls.accessTokenExpiration,
+                                dataType: 'json'
+                            }).done(function (accessTokenExpirationEntity) {
+                                var accessTokenExpiration = accessTokenExpirationEntity.accessTokenExpiration;
+                                // Convert ISO 8601 string to session expiration in seconds
+                                var expiration = Date.parse(accessTokenExpiration.expiration);
+                                var expirationSeconds = expiration / 1000;
+                                var sessionExpiration = Math.round(expirationSeconds);
+                                nfAuthorizationStorage.setToken(sessionExpiration);
+                                deferred.resolve();
                             }).fail(function () {
                                 deferred.reject();
                             });

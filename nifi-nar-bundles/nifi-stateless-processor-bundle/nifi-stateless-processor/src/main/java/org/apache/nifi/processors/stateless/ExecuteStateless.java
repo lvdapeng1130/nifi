@@ -22,6 +22,7 @@ import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
 import org.apache.nifi.annotation.behavior.Restricted;
 import org.apache.nifi.annotation.behavior.SupportsBatching;
+import org.apache.nifi.annotation.behavior.SupportsSensitiveDynamicProperties;
 import org.apache.nifi.annotation.behavior.SystemResource;
 import org.apache.nifi.annotation.behavior.SystemResourceConsideration;
 import org.apache.nifi.annotation.behavior.SystemResourceConsiderations;
@@ -41,6 +42,7 @@ import org.apache.nifi.components.resource.ResourceType;
 import org.apache.nifi.flow.Bundle;
 import org.apache.nifi.flow.VersionedConnection;
 import org.apache.nifi.flow.VersionedControllerService;
+import org.apache.nifi.flow.VersionedExternalFlow;
 import org.apache.nifi.flow.VersionedLabel;
 import org.apache.nifi.flow.VersionedPort;
 import org.apache.nifi.flow.VersionedProcessGroup;
@@ -55,10 +57,12 @@ import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.processors.stateless.retrieval.CachingDataflowProvider;
 import org.apache.nifi.processors.stateless.retrieval.DataflowProvider;
 import org.apache.nifi.processors.stateless.retrieval.FileSystemDataflowProvider;
 import org.apache.nifi.processors.stateless.retrieval.RegistryDataflowProvider;
+import org.apache.nifi.registry.VersionedFlowConverter;
 import org.apache.nifi.registry.bucket.Bucket;
 import org.apache.nifi.registry.flow.VersionedFlow;
 import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
@@ -117,6 +121,7 @@ import static org.apache.nifi.processor.util.StandardValidators.createDirectoryE
 
 @Restricted
 @SupportsBatching
+@SupportsSensitiveDynamicProperties
 @SystemResourceConsiderations({
     @SystemResourceConsideration(resource= SystemResource.CPU),
     @SystemResourceConsideration(resource= SystemResource.DISK),
@@ -329,6 +334,16 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
         .defaultValue("1 MB")
         .build();
 
+    public static final PropertyDescriptor STATUS_TASK_INTERVAL = new Builder()
+            .name("Status Task Interval")
+            .displayName("Status Task Interval")
+            .description("The Stateless engine periodically logs the status of the dataflow's processors.  This property allows the interval to be changed, or the status logging " +
+                    "to be skipped altogether if the property is not set.")
+            .required(false)
+            .addValidator(StandardValidators.createTimePeriodValidator(10, TimeUnit.SECONDS, 24, TimeUnit.HOURS))
+            .expressionLanguageSupported(NONE)
+            .build();
+
     static final Relationship REL_ORIGINAL = new Relationship.Builder()
         .name("original")
         .description("For any incoming FlowFile that is successfully processed, the original incoming FlowFile will be transferred to this Relationship")
@@ -375,7 +390,8 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
             MAX_INGEST_FLOWFILES,
             MAX_INGEST_DATA_SIZE,
             STATELESS_SSL_CONTEXT_SERVICE,
-            KRB5_CONF);
+            KRB5_CONF,
+                STATUS_TASK_INTERVAL);
     }
 
     @Override
@@ -389,7 +405,6 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
             .name(propertyDescriptorName)
             .defaultValue("Value for the " + propertyDescriptorName + " parameter")
             .addValidator(Validator.VALID)
-            .sensitive(true)
             .dynamic(true)
             .build();
     }
@@ -450,7 +465,7 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
         final StatelessEngineConfiguration engineConfiguration = createEngineConfiguration(context, dataflowIndex);
         final StatelessBootstrap bootstrap = StatelessBootstrap.bootstrap(engineConfiguration, Thread.currentThread().getContextClassLoader());
 
-        final DataflowDefinition<VersionedFlowSnapshot> dataflowDefinition = createDataflowDefinition(context, flowSnapshot);
+        final DataflowDefinition dataflowDefinition = createDataflowDefinition(context, flowSnapshot);
 
         final StatelessDataflow dataflow = bootstrap.createDataflow(dataflowDefinition);
         dataflow.initialize();
@@ -734,7 +749,8 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
     }
 
 
-    private DataflowDefinition<VersionedFlowSnapshot> createDataflowDefinition(final ProcessContext context, final VersionedFlowSnapshot flowSnapshot) {
+    private DataflowDefinition createDataflowDefinition(final ProcessContext context, final VersionedFlowSnapshot flowSnapshot) {
+        final VersionedExternalFlow externalFlow = VersionedFlowConverter.createVersionedExternalFlow(flowSnapshot);
         final ParameterValueProviderDefinition parameterValueProviderDefinition = new ParameterValueProviderDefinition();
         parameterValueProviderDefinition.setType("org.apache.nifi.stateless.parameter.OverrideParameterValueProvider");
         parameterValueProviderDefinition.setName("Parameter Override");
@@ -771,10 +787,10 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
             }
         };
 
-        return new DataflowDefinition<VersionedFlowSnapshot>() {
+        return new DataflowDefinition() {
             @Override
-            public VersionedFlowSnapshot getFlowSnapshot() {
-                return flowSnapshot;
+            public VersionedExternalFlow getVersionedExternalFlow() {
+                return externalFlow;
             }
 
             @Override
@@ -850,6 +866,8 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
             contentRepoDirectory = null;
         }
 
+        final String statusTaskInterval = context.getProperty(STATUS_TASK_INTERVAL).getValue();
+
         return new StatelessEngineConfiguration() {
             @Override
             public File getWorkingDirectory() {
@@ -899,6 +917,11 @@ public class ExecuteStateless extends AbstractProcessor implements Searchable {
             @Override
             public boolean isLogExtensionDiscovery() {
                 return false;
+            }
+
+            @Override
+            public String getStatusTaskInterval() {
+                return statusTaskInterval;
             }
         };
     }

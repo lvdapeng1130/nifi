@@ -18,6 +18,7 @@
 package org.apache.nifi.stateless.repository;
 
 import org.apache.nifi.controller.repository.ContentRepository;
+import org.apache.nifi.controller.repository.ContentRepositoryContext;
 import org.apache.nifi.controller.repository.claim.ContentClaim;
 import org.apache.nifi.controller.repository.claim.ResourceClaim;
 import org.apache.nifi.controller.repository.claim.ResourceClaimManager;
@@ -43,8 +44,8 @@ public class ByteArrayContentRepository implements ContentRepository {
     private ResourceClaimManager resourceClaimManager;
 
     @Override
-    public void initialize(final ResourceClaimManager claimManager) {
-        resourceClaimManager = claimManager;
+    public void initialize(final ContentRepositoryContext context) {
+        resourceClaimManager = context.getResourceClaimManager();
     }
 
     @Override
@@ -208,13 +209,22 @@ public class ByteArrayContentRepository implements ContentRepository {
     }
 
     @Override
+    public long size(final ResourceClaim claim) throws IOException {
+        return 0;
+    }
+
+    @Override
     public InputStream read(final ContentClaim claim) {
+        if (claim == null) {
+            return new ByteArrayInputStream(new byte[0]);
+        }
+
         final ByteArrayContentClaim byteArrayContentClaim = verifyClaim(claim);
         return byteArrayContentClaim.read();
     }
 
     @Override
-    public InputStream read(final ResourceClaim claim) throws IOException {
+    public InputStream read(final ResourceClaim claim) {
         if (claim == null) {
             return new ByteArrayInputStream(new byte[0]);
         }

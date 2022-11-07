@@ -17,6 +17,7 @@
 
 package org.apache.nifi.minifi.c2.configuration;
 
+import org.apache.nifi.minifi.c2.service.C2JsonProviderFeature;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.springframework.context.ApplicationContext;
 import org.springframework.web.context.support.WebApplicationContextUtils;
@@ -29,6 +30,8 @@ public class C2ResourceConfig extends ResourceConfig {
     public C2ResourceConfig(@Context ServletContext servletContext) {
         final ApplicationContext appCtx = WebApplicationContextUtils.getWebApplicationContext(servletContext);
 
+        // register Jackson Object Mapper Resolver
+        register(C2JsonProviderFeature.class);
         register(appCtx.getBean("configService"));
     }
 }

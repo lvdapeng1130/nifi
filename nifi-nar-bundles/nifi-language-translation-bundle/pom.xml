@@ -29,5 +29,4 @@
         <module>nifi-yandex-processors</module>
         <module>nifi-language-translation-nar</module>
     </modules>
-
 </project>

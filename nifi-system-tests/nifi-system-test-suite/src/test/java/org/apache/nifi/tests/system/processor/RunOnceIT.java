@@ -20,14 +20,16 @@ import org.apache.nifi.tests.system.NiFiSystemIT;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.NiFiClientException;
 import org.apache.nifi.web.api.entity.ConnectionEntity;
 import org.apache.nifi.web.api.entity.ProcessorEntity;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class RunOnceIT extends NiFiSystemIT {
 
+    @Timeout(10)
     @Test
     public void testRunOnce() throws NiFiClientException, IOException, InterruptedException {
         ProcessorEntity generate = getClientUtil().createProcessor("GenerateFlowFile");
@@ -46,5 +48,18 @@ public class RunOnceIT extends NiFiSystemIT {
 
         assertEquals("Stopped", actualRunStatus);
         assertEquals(1, getConnectionQueueSize(generateToTerminate.getId()));
+
+        // Test CRON_DRIVEN Strategy
+        getClientUtil().updateProcessorSchedulingStrategy(generate, "CRON_DRIVEN");
+        getClientUtil().updateProcessorSchedulingPeriod(generate, "* * * * * ?");
+
+        getNifiClient().getProcessorClient().runProcessorOnce(generate);
+
+        waitForQueueCount(generateToTerminate.getId(), 2);
+
+        actualRunStatus = actualGenerate.getStatus().getRunStatus();
+
+        assertEquals("Stopped", actualRunStatus);
+        assertEquals(2, getConnectionQueueSize(generateToTerminate.getId()));
     }
 }

@@ -17,29 +17,37 @@
 
 package org.apache.nifi.minifi.bootstrap.configuration.ingestors;
 
+import static org.apache.nifi.minifi.bootstrap.configuration.ingestors.PullHttpChangeIngestor.PULL_HTTP_BASE_KEY;
+import static org.mockito.Mockito.when;
 
+import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.OkHttpClient;
 import org.apache.nifi.minifi.bootstrap.ConfigurationFileHolder;
 import org.apache.nifi.minifi.bootstrap.configuration.ConfigurationChangeNotifier;
 import org.apache.nifi.minifi.bootstrap.configuration.ingestors.common.RestChangeIngestorCommonTest;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.mockito.Mockito;
 
 import java.net.MalformedURLException;
 import java.util.Properties;
 
-
 public class RestChangeIngestorTest extends RestChangeIngestorCommonTest {
 
-    @BeforeClass
+    @BeforeAll
     public static void setUp() throws InterruptedException, MalformedURLException {
         Properties properties = new Properties();
+        properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
+        properties.put(PULL_HTTP_BASE_KEY + ".override.core", "true");
         restChangeIngestor = new RestChangeIngestor();
 
         testNotifier = Mockito.mock(ConfigurationChangeNotifier.class);
 
-        restChangeIngestor.initialize(properties, Mockito.mock(ConfigurationFileHolder.class), testNotifier);
+        ConfigurationFileHolder configurationFileHolder = Mockito.mock(ConfigurationFileHolder.class);
+        when(configurationFileHolder.getConfigFileReference()).thenReturn(new AtomicReference<>(ByteBuffer.wrap(new byte[0])));
+
+        restChangeIngestor.initialize(properties, configurationFileHolder, testNotifier);
         restChangeIngestor.setDifferentiator(mockDifferentiator);
         restChangeIngestor.start();
 
@@ -49,7 +57,7 @@ public class RestChangeIngestorTest extends RestChangeIngestorCommonTest {
         Thread.sleep(1000);
     }
 
-    @AfterClass
+    @AfterAll
     public static void stop() throws Exception {
         restChangeIngestor.close();
         client = null;

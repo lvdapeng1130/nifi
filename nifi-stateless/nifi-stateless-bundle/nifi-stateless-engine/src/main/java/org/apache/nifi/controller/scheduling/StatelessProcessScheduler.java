@@ -27,6 +27,7 @@ import org.apache.nifi.controller.ConfigurationContext;
 import org.apache.nifi.controller.ProcessScheduler;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.ReportingTaskNode;
+import org.apache.nifi.controller.ScheduledState;
 import org.apache.nifi.controller.SchedulingAgentCallback;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
@@ -103,7 +104,7 @@ public class StatelessProcessScheduler implements ProcessScheduler {
         }
     }
 
-    public void initialize(final ProcessContextFactory processContextFactory, final DataflowDefinition<?> dataflowDefinition) {
+    public void initialize(final ProcessContextFactory processContextFactory, final DataflowDefinition dataflowDefinition) {
         this.processContextFactory = processContextFactory;
 
         final String threadNameSuffix = dataflowDefinition.getFlowName() == null ? "" : " for dataflow " + dataflowDefinition.getFlowName();
@@ -149,7 +150,8 @@ public class StatelessProcessScheduler implements ProcessScheduler {
         logger.info("Stopping {}", procNode);
         final ProcessContext processContext = processContextFactory.createProcessContext(procNode);
         final LifecycleState lifecycleState = new LifecycleState();
-        lifecycleState.setScheduled(false);
+        final boolean scheduled = procNode.getScheduledState() == ScheduledState.RUNNING || procNode.getActiveThreadCount() > 0;
+        lifecycleState.setScheduled(scheduled);
         return procNode.stop(this, this.componentLifeCycleThreadPool, processContext, schedulingAgent, lifecycleState);
     }
 
@@ -243,7 +245,8 @@ public class StatelessProcessScheduler implements ProcessScheduler {
     }
 
     @Override
-    public void unschedule(final ReportingTaskNode taskNode) {
+    public Future<Void> unschedule(final ReportingTaskNode taskNode) {
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override

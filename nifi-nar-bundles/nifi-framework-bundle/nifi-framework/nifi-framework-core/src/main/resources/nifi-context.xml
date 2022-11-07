@@ -35,11 +35,6 @@
         <constructor-arg ref="nifiProperties" />
     </bean>
 
-    <!-- flow registry -->
-    <bean id="flowRegistryClient" class="org.apache.nifi.registry.flow.StandardFlowRegistryClient">
-        <property name="properties" ref="nifiProperties" />
-    </bean>
-
     <!-- extension manager -->
     <bean id="extensionManager" class="org.apache.nifi.spring.ExtensionManagerFactoryBean">
     </bean>
@@ -54,7 +49,6 @@
         <property name="clusterCoordinator" ref="clusterCoordinator" />
         <property name="variableRegistry" ref="variableRegistry"/>
         <property name="leaderElectionManager" ref="leaderElectionManager" />
-        <property name="flowRegistryClient" ref="flowRegistryClient" />
         <property name="extensionManager" ref="extensionManager" />
         <property name="revisionManager" ref="revisionManager" />
         <property name="statusHistoryRepository" ref="statusHistoryRepository" />
@@ -65,6 +59,15 @@
         <property name="properties" ref="nifiProperties"/>
         <property name="encryptor" ref="propertyEncryptor" />
         <property name="authorizer" ref="authorizer" />
+    </bean>
+
+    <!-- extension manifest parser -->
+    <bean id="extensionManifestParser" class="org.apache.nifi.extension.manifest.parser.jaxb.JAXBExtensionManifestParser" />
+
+    <!-- runtime manifest generator -->
+    <bean id="runtimeManifestService" class="org.apache.nifi.manifest.StandardRuntimeManifestService" >
+        <constructor-arg ref="extensionManager" />
+        <constructor-arg ref="extensionManifestParser" />
     </bean>
 
     <!-- bulletin repository -->

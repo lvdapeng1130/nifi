@@ -31,10 +31,9 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
         <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna-platform</artifactId>
-            <version>4.4.0</version>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-bootstrap-utils</artifactId>
+            <version>1.18.0</version>
         </dependency>
     </dependencies>
-
 </project>

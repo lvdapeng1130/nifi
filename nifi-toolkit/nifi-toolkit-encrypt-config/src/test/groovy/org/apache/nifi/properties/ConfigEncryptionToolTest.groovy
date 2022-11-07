@@ -16,6 +16,7 @@
  */
 package org.apache.nifi.properties
 
+import groovy.test.GroovyLogTestCase
 import org.apache.commons.cli.CommandLine
 import org.apache.commons.cli.CommandLineParser
 import org.apache.commons.cli.DefaultParser
@@ -54,7 +55,7 @@ import java.security.KeyException
 import java.security.Security
 
 @RunWith(JUnit4.class)
-class ConfigEncryptionToolTest extends GroovyTestCase {
+class ConfigEncryptionToolTest extends GroovyLogTestCase {
     private static final Logger logger = LoggerFactory.getLogger(ConfigEncryptionToolTest.class)
 
     @Rule
@@ -90,11 +91,11 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
     private static final int LIP_PASSWORD_LINE_COUNT = 3
     private static final int AUTHORIZERS_PASSWORD_LINE_COUNT = 3
+    private static final int AUTHORIZERS_SECRET_LINE_COUNT = 1
     private final String PASSWORD_PROP_REGEX = "<property[^>]* name=\".* Password\""
+    private final String SECRET_PROP_REGEX = "<property[^>]* name=\".* Secret\""
 
     private static final EncryptionMethod DEFAULT_ENCRYPTION_METHOD = EncryptionMethod.MD5_256AES
-    private static final String DEFAULT_ALGORITHM = DEFAULT_ENCRYPTION_METHOD.algorithm
-    private static final String DEFAULT_PROVIDER = DEFAULT_ENCRYPTION_METHOD.provider
     private static final String WFXCTR = ConfigEncryptionTool.WRAPPED_FLOW_XML_CIPHER_TEXT_REGEX
     private final String DEFAULT_LEGACY_SENSITIVE_PROPS_KEY = "nififtw!"
 
@@ -127,16 +128,6 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
     private static int getKeyLength(String keyHex = KEY_HEX) {
         keyHex?.size() * 4
-    }
-
-    private static void printProperties(NiFiProperties properties) {
-        if (!(properties instanceof ProtectedNiFiProperties)) {
-            properties = new ProtectedNiFiProperties(properties)
-        }
-
-        (properties as ProtectedNiFiProperties).getPropertyKeysIncludingProtectionSchemes().sort().each { String key ->
-            logger.info("${key}\t\t${properties.getProperty(key)}")
-        }
     }
 
     /**
@@ -624,36 +615,6 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
     }
 
     @Test
-    void testParseKeyShouldThrowExceptionForInvalidKeys() {
-        // Arrange
-        List<String> keyValues = [
-                "0123 4567",
-                "non-hex-chars",
-                KEY_HEX[0..<-1],
-                "&ITD SF^FI&&%SDIF"
-        ]
-
-        def validKeyLengths = ConfigEncryptionTool.getValidKeyLengths()
-        def bitLengths = validKeyLengths.collect { it / 4 }
-        String secondHalf = /\[${validKeyLengths.join(", ")}\] bits / +
-                /\(\[${bitLengths.join(", ")}\]/ + / hex characters\)/.toString()
-
-        // Act
-        keyValues.each { String key ->
-            logger.info("Reading key: [${key}]")
-            def msg = shouldFail(KeyException) {
-                String parsedKey = ConfigEncryptionTool.parseKey(key)
-                logger.info("Parsed key:  [${parsedKey}]")
-            }
-            logger.expected(msg)
-            int trimmedKeySize = key.replaceAll("[^0-9a-fA-F]", "").size()
-
-            // Assert
-            assert msg =~ "The key \\(${trimmedKeySize} hex chars\\) must be of length ${secondHalf}"
-        }
-    }
-
-    @Test
     void testShouldActuallyDeriveKeyFromPassword() {
         // Arrange
         logger.info("Using password: [${PASSWORD}]")
@@ -770,16 +731,9 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         String[] args = ["-n", workingFile.path, "-k", KEY_HEX]
         tool.parse(args)
 
-        // Act
-        def msg = shouldFail(IOException) {
+        shouldFail(IOException) {
             tool.loadNiFiProperties()
-            logger.info("Read nifi.properties")
         }
-        logger.expected(msg)
-
-        // Assert
-        assert msg == "Cannot load NiFiProperties from [${workingFile.path}]".toString()
-
         workingFile.deleteOnExit()
     }
 
@@ -874,11 +828,8 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 "${ConfigEncryptionTool.BOOTSTRAP_KEY_PREFIX}="
         ]
 
-        // Act
         List<String> updatedLines = tool.updateBootstrapContentsWithKey(originalLines.clone() as List<String>)
-        logger.info("Updated bootstrap.conf lines: ${updatedLines}")
 
-        // Assert
         assert updatedLines.size() == originalLines.size() + 1
         assert updatedLines.first() == ConfigEncryptionTool.BOOTSTRAP_KEY_COMMENT
         assert updatedLines.last() == EXPECTED_KEY_LINE
@@ -940,40 +891,19 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
     @Test
     void testShouldEncryptNiFiPropertiesWithEmptyProtectionScheme() {
-        // Arrange
         String originalNiFiPropertiesPath = "src/test/resources/nifi_with_sensitive_properties_unprotected_and_empty_protection_schemes.properties"
 
-        File originalFile = new File(originalNiFiPropertiesPath)
-        List<String> originalLines = originalFile.readLines()
-        logger.info("Read ${originalLines.size()} lines from ${originalNiFiPropertiesPath}")
-        logger.info("\n" + originalLines[0..3].join("\n") + "...")
-
         NiFiProperties plainProperties = NiFiPropertiesLoader.withKey(KEY_HEX).load(originalNiFiPropertiesPath)
-        logger.info("Loaded NiFiProperties from ${originalNiFiPropertiesPath}")
-
         ProtectedNiFiProperties protectedWrapper = new ProtectedNiFiProperties(plainProperties)
-        logger.info("Loaded ${plainProperties.size()} properties")
-        logger.info("There are ${protectedWrapper.getSensitivePropertyKeys().size()} sensitive properties")
-
         ConfigEncryptionTool tool = new ConfigEncryptionTool(keyHex: KEY_HEX)
 
         final SensitivePropertyProvider spp = DEFAULT_PROVIDER_FACTORY.getProvider(tool.protectionScheme)
         int protectedPropertyCount = protectedWrapper.getProtectedPropertyKeys().size()
-        logger.info("Counted ${protectedPropertyCount} protected keys")
         assert protectedPropertyCount < protectedWrapper.getSensitivePropertyKeys().size()
 
-
-        // Act
         NiFiProperties encryptedProperties = tool.encryptSensitiveProperties(plainProperties)
 
-        // Assert
         ProtectedNiFiProperties encryptedWrapper = new ProtectedNiFiProperties(encryptedProperties)
-        encryptedWrapper.getProtectedPropertyKeys().every { String key, String protectionScheme ->
-            logger.info("${key} is protected by ${protectionScheme}")
-            assert protectionScheme == spp.identifierKey
-        }
-
-        printProperties(encryptedWrapper)
 
         assert encryptedWrapper.getProtectedPropertyKeys().size() == encryptedWrapper.getSensitivePropertyKeys().findAll {
             encryptedWrapper.getProperty(it)
@@ -1037,48 +967,26 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
     @Test
     void testShouldSerializeNiFiPropertiesAndPreserveFormatWithExistingProtectionSchemes() {
-        // Arrange
         String originalNiFiPropertiesPath = "src/test/resources/nifi_with_few_sensitive_properties_protected_aes.properties"
 
         File originalFile = new File(originalNiFiPropertiesPath)
         List<String> originalLines = originalFile.readLines()
-        logger.info("Read ${originalLines.size()} lines from ${originalNiFiPropertiesPath}")
-        logger.info("\n" + originalLines[0..3].join("\n") + "...")
 
-        ProtectedNiFiProperties protectedProperties = NiFiPropertiesLoader.withKey(KEY_HEX).readProtectedPropertiesFromDisk(new File(originalNiFiPropertiesPath))
-        logger.info("Loaded NiFiProperties from ${originalNiFiPropertiesPath}")
-
-        logger.info("Loaded ${protectedProperties.getPropertyKeys().size()} properties")
-        logger.info("There are ${protectedProperties.getSensitivePropertyKeys().size()} sensitive properties")
-        logger.info("There are ${protectedProperties.getProtectedPropertyKeys().size()} protected properties")
+        ProtectedNiFiProperties protectedProperties = NiFiPropertiesLoader.withKey(KEY_HEX).loadProtectedProperties(new File(originalNiFiPropertiesPath))
         int originalProtectedPropertyCount = protectedProperties.getProtectedPropertyKeys().size()
 
         protectedProperties.addSensitivePropertyProvider(DEFAULT_PROVIDER_FACTORY.getProvider(ConfigEncryptionTool.DEFAULT_PROTECTION_SCHEME))
         NiFiProperties encryptedProperties = protectedProperties.getApplicationProperties()
         int protectedPropertyCount = ProtectedNiFiProperties.countProtectedProperties(encryptedProperties)
-        logger.info("Counted ${protectedPropertyCount} protected keys")
 
         int protectedCountChange = protectedPropertyCount - originalProtectedPropertyCount
-        logger.info("Expected line count change: ${protectedCountChange}")
-
-        // Act
         List<String> lines = ConfigEncryptionTool.serializeNiFiPropertiesAndPreserveFormat(protectedProperties, originalFile)
-        logger.info("Serialized NiFiProperties to ${lines.size()} lines")
-        lines.eachWithIndex { String entry, int i ->
-            logger.debug("${(i + 1).toString().padLeft(3)}: ${entry}")
-        }
 
-        // Assert
-
-        // Added n new lines for the encrypted properties
         assert lines.size() == originalLines.size() + protectedCountChange
 
         protectedProperties.getPropertyKeys().every { String key ->
             assert lines.contains("${key}=${protectedProperties.getProperty(key)}".toString())
         }
-
-        logger.info("Updated nifi.properties:")
-        logger.info("\n" * 2 + lines.join("\n"))
     }
 
     @Test
@@ -1271,7 +1179,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for sensitive properties are not the same as the original (i.e. it was encrypted)
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(outputPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(outputPropertiesFile)
                 assert updatedProperties.size() >= inputProperties.size()
                 originalSensitiveValues.every { String key, String originalValue ->
                     assert updatedProperties.getProperty(key) != originalValue
@@ -1299,13 +1207,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
             }
         })
 
-        // Act
         ConfigEncryptionTool.main(args)
-        logger.info("Invoked #main with ${args.join(" ")}")
-
-        // Assert
-
-        // Assertions defined above
     }
 
     @Test
@@ -1353,7 +1255,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for sensitive properties are not the same as the original (i.e. it was encrypted)
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(outputPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(outputPropertiesFile)
                 assert updatedProperties.size() >= inputProperties.size()
                 originalSensitiveValues.every { String key, String originalValue ->
                     assert updatedProperties.getProperty(key) != originalValue
@@ -1381,13 +1283,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
             }
         })
 
-        // Act
         ConfigEncryptionTool.main(args)
-        logger.info("Invoked #main with ${args.join(" ")}")
-
-        // Assert
-
-        // Assertions defined above
     }
 
     @Test
@@ -1447,7 +1343,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for sensitive properties are not the same as the original (i.e. it was encrypted)
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(outputPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(outputPropertiesFile)
                 assert updatedProperties.size() >= inputProperties.size()
                 originalSensitiveValues.every { String key, String originalValue ->
                     assert updatedProperties.getProperty(key) != originalValue
@@ -1475,12 +1371,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
             }
         })
 
-        logger.info("Invoked #main second time with ${args.join(" ")}")
         ConfigEncryptionTool.main(args)
-
-        // Assert
-
-        // Assertions defined above
     }
 
     /**
@@ -1567,7 +1458,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for sensitive properties are not the same as the original (i.e. it was re-encrypted)
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(outputPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(outputPropertiesFile)
                 assert updatedProperties.size() >= inputProperties.size()
                 originalSensitiveValues.every { String key, String originalValue ->
                     assert updatedProperties.getProperty(key) != originalValue
@@ -1595,12 +1486,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
             }
         })
 
-        logger.info("Migrating key (${scenario}) with ${localArgs.join(" ")}")
         ConfigEncryptionTool.main(localArgs as String[])
-
-        // Assert
-
-        // Assertions defined above
     }
 
     /**
@@ -1608,58 +1494,34 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
      */
     @Test
     void testShouldMigrateFromPasswordToPassword() {
-        // Arrange
         String scenario = "password to password"
         def args = ["-w", PASSWORD, "-p", PASSWORD.reverse()]
 
-        // Act
         performKeyMigration(scenario, args, PASSWORD, PASSWORD.reverse())
-
-        // Assert
-
-        // Assertions in common method above
     }
 
     @Test
     void testShouldMigrateFromPasswordToKey() {
-        // Arrange
         String scenario = "password to key"
         def args = ["-w", PASSWORD, "-k", KEY_HEX]
 
-        // Act
         performKeyMigration(scenario, args, PASSWORD, "", "", KEY_HEX)
-
-        // Assert
-
-        // Assertions in common method above
     }
 
     @Test
     void testShouldMigrateFromKeyToPassword() {
-        // Arrange
         String scenario = "key to password"
         def args = ["-e", PASSWORD_KEY_HEX, "-p", PASSWORD.reverse()]
 
-        // Act
         performKeyMigration(scenario, args, "", PASSWORD.reverse(), PASSWORD_KEY_HEX, "")
-
-        // Assert
-
-        // Assertions in common method above
     }
 
     @Test
     void testShouldMigrateFromKeyToKey() {
-        // Arrange
         String scenario = "key to key"
         def args = ["-e", PASSWORD_KEY_HEX, "-k", KEY_HEX]
 
-        // Act
         performKeyMigration(scenario, args, "", "", PASSWORD_KEY_HEX, KEY_HEX)
-
-        // Assert
-
-        // Assertions in common method above
     }
 
     @Test
@@ -2395,7 +2257,6 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 def originalParsedXml = new XmlSlurper().parseText(originalXmlContent)
                 def updatedParsedXml = new XmlSlurper().parseText(updatedXmlContent)
                 assert originalParsedXml != updatedParsedXml
-//                assert originalParsedXml.'**'.findAll { it.@encryption } != updatedParsedXml.'**'.findAll { it.@encryption }
 
                 def encryptedValues = updatedParsedXml.provider.find {
                     it.identifier == 'ldap-provider'
@@ -2424,13 +2285,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
             }
         })
 
-        // Act
         ConfigEncryptionTool.main(args)
-        logger.info("Invoked #main with ${args.join(" ")}")
-
-        // Assert
-
-        // Assertions defined above
     }
 
     @Test
@@ -2466,6 +2321,40 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         def passwordLines = decryptedLines.findAll { it =~ PASSWORD_PROP_REGEX }
         assert passwordLines.size() == AUTHORIZERS_PASSWORD_LINE_COUNT
         assert passwordLines.every { it =~ ">thisIsABadPassword<" }
+        // Some lines were not encrypted originally so the encryption attribute would not have been updated
+        assert passwordLines.any { it =~ "encryption=\"none\"" }
+    }
+
+    @Test
+    void testShouldDecryptAzureAuthorizers() {
+        // Arrange
+        String authorizersPath = "src/test/resources/authorizers-populated-encrypted-azure.xml"
+        String propertyName = "Manager Password"
+        File authorizersFile = new File(authorizersPath)
+
+        setupTmpDir()
+
+        File workingFile = new File("target/tmp/tmp-authorizers.xml")
+        workingFile.delete()
+        Files.copy(authorizersFile.toPath(), workingFile.toPath())
+        ConfigEncryptionTool tool = new ConfigEncryptionTool()
+
+        // Sanity check for decryption
+        String cipherText = "zOfN7Fy4XnHmd/x0||rTLB/FXB4CLFsCunBwtNMR2hYtj7CdvgF7iFgNNr49g1pw=="
+        String EXPECTED_PASSWORD = "thisIsABadPassword"
+        final SensitivePropertyProvider spp = StandardSensitivePropertyProviderFactory.withKey(KEY_HEX_128).getProvider(tool.protectionScheme)
+
+        tool.keyHex = KEY_HEX_128
+
+        def lines = workingFile.readLines()
+
+        // Act
+        def decryptedLines = tool.decryptAuthorizers(lines.join("\n")).split("\n")
+
+        // Assert
+        def passwordLines = decryptedLines.findAll { it =~ PASSWORD_PROP_REGEX || it =~ SECRET_PROP_REGEX }
+        assert passwordLines.size() == AUTHORIZERS_PASSWORD_LINE_COUNT + AUTHORIZERS_SECRET_LINE_COUNT
+        assert passwordLines.every { it =~ EXPECTED_PASSWORD }
         // Some lines were not encrypted originally so the encryption attribute would not have been updated
         assert passwordLines.any { it =~ "encryption=\"none\"" }
     }
@@ -2594,6 +2483,47 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         assert passwordLines.every { !it.contains(">thisIsABadPassword<") }
         assert passwordLines.every { it.contains(encryptionScheme) }
         passwordLines.each {
+            String ct = (it =~ ">(.*)</property>")[0][1]
+            String propertyName = (it =~ 'name="(.*)"')[0][1]
+            logger.info("Cipher text: ${ct}")
+            assert spp.unprotect(ct, ldapPropertyContext(propertyName)) == PASSWORD
+        }
+    }
+
+    @Test
+    void testShouldEncryptAzureAuthorizer() {
+        // Arrange
+        String authorizersPath = "src/test/resources/authorizers-populated-azure.xml"
+        File authorizersFile = new File(authorizersPath)
+
+        setupTmpDir()
+
+        File workingFile = new File("target/tmp/tmp-authorizers.xml")
+        workingFile.delete()
+        Files.copy(authorizersFile.toPath(), workingFile.toPath())
+        ConfigEncryptionTool tool = new ConfigEncryptionTool()
+        tool.isVerbose = true
+
+        tool.keyHex = KEY_HEX
+        String encryptionScheme = "encryption=\"aes/gcm/${getKeyLength(KEY_HEX)}\""
+
+        def lines = workingFile.readLines()
+        logger.info("Read lines: \n${lines.join("\n")}")
+
+        final SensitivePropertyProvider spp = DEFAULT_PROVIDER_FACTORY.getProvider(tool.protectionScheme)
+
+        // Act
+        def encryptedLines = tool.encryptAuthorizers(lines.join("\n")).split("\n")
+
+        // Assert
+        def passwordLines = encryptedLines.findAll { it =~ PASSWORD_PROP_REGEX }
+        def secretLines = encryptedLines.findAll { it =~ SECRET_PROP_REGEX }
+        assert passwordLines.size() == AUTHORIZERS_PASSWORD_LINE_COUNT
+        assert secretLines.size() == AUTHORIZERS_SECRET_LINE_COUNT
+        def combinedLines = passwordLines + secretLines
+        assert combinedLines.every { !it.contains(">thisIsABadPassword<") }
+        assert combinedLines.every { it.contains(encryptionScheme) }
+        combinedLines.each {
             String ct = (it =~ ">(.*)</property>")[0][1]
             String propertyName = (it =~ 'name="(.*)"')[0][1]
             logger.info("Cipher text: ${ct}")
@@ -2823,6 +2753,41 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
         // Ensure the replacement actually occurred
         assert trimmedSerializedLines.findAll { it =~ "encryption=" }.size() == AUTHORIZERS_PASSWORD_LINE_COUNT
+    }
+
+    @Test
+    void testSerializeAuthorizersShouldOutputAzureProvider() {
+        // Arrange
+        String authorizersPath = "src/test/resources/authorizers-populated-azure.xml"
+        File authorizersFile = new File(authorizersPath)
+
+        setupTmpDir()
+
+        File workingFile = new File("target/tmp/tmp-authorizers.xml")
+        workingFile.delete()
+        Files.copy(authorizersFile.toPath(), workingFile.toPath())
+        ConfigEncryptionTool tool = new ConfigEncryptionTool()
+        tool.isVerbose = true
+
+        def lines = workingFile.readLines()
+
+        String plainXml = workingFile.text
+        String encryptedXml = tool.encryptAuthorizers(plainXml, KEY_HEX)
+
+        // Act
+        def serializedLines = tool.serializeAuthorizersAndPreserveFormat(encryptedXml, workingFile)
+
+        // Assert
+
+        // Some empty lines will be removed
+        def trimmedLines = lines.collect { it.trim() }.findAll { it }
+        def trimmedSerializedLines = serializedLines.collect { it.trim() }.findAll { it }
+        assert trimmedLines.size() == trimmedSerializedLines.size()
+
+        // Ensure the replacement actually occurred
+        assert trimmedSerializedLines.findAll { it =~ "encryption=" }.size() == AUTHORIZERS_PASSWORD_LINE_COUNT + AUTHORIZERS_SECRET_LINE_COUNT
+        assert trimmedSerializedLines.find {it =~ ConfigEncryptionTool.LDAP_USER_GROUP_PROVIDER_CLASS }
+        assert trimmedSerializedLines.find {it =~ ConfigEncryptionTool.AZURE_USER_GROUP_PROVIDER_CLASS }
     }
 
     @Test
@@ -3309,7 +3274,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for sensitive properties are not the same as the original (i.e. it was encrypted)
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(outputPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(outputPropertiesFile)
                 assert updatedProperties.size() >= inputProperties.size()
                 originalSensitiveValues.every { String key, String originalValue ->
                     assert updatedProperties.getProperty(key) != originalValue
@@ -3505,7 +3470,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for everything is the same except the sensitive props key
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(workingNiFiPropertiesFile)
                 assert updatedProperties.size() == inputProperties.size()
                 assert updatedProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_KEY) == newFlowPassword
                 originalSensitiveValues.every { String key, String originalValue ->
@@ -3555,10 +3520,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
      */
     @Test
     void testShouldPerformFullOperationOnFlowXmlWithSameSensitivePropsKey() {
-        // Arrange
         exit.expectSystemExitWithStatus(0)
-
-        File tmpDir = setupTmpDir()
 
         File emptyKeyFile = new File("src/test/resources/bootstrap_with_empty_root_key.conf")
         File bootstrapFile = new File("target/tmp/tmp_bootstrap.conf")
@@ -3569,7 +3531,6 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         String originalKeyLine = originalBootstrapLines.find {
             it.startsWith(ConfigEncryptionTool.BOOTSTRAP_KEY_PREFIX)
         }
-        logger.info("Original key line from bootstrap.conf: ${originalKeyLine}")
         assert originalKeyLine == ConfigEncryptionTool.BOOTSTRAP_KEY_PREFIX
 
         final String EXPECTED_KEY_LINE = ConfigEncryptionTool.BOOTSTRAP_KEY_PREFIX
@@ -3594,10 +3555,8 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         final int CIPHER_TEXT_COUNT = originalFlowCipherTexts.size()
 
         NiFiProperties inputProperties = new NiFiPropertiesLoader().load(workingNiFiPropertiesFile)
-        logger.info("Loaded ${inputProperties.size()} properties from input file")
         ProtectedNiFiProperties protectedInputProperties = new ProtectedNiFiProperties(inputProperties)
         def originalSensitiveValues = protectedInputProperties.getSensitivePropertyKeys().collectEntries { String key -> [(key): protectedInputProperties.getProperty(key)] }
-        logger.info("Original sensitive values: ${originalSensitiveValues}")
 
         String newFlowPassword = DEFAULT_LEGACY_SENSITIVE_PROPS_KEY
 
@@ -3606,11 +3565,9 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         exit.checkAssertionAfterwards(new Assertion() {
             void checkAssertion() {
                 final List<String> updatedPropertiesLines = workingNiFiPropertiesFile.readLines()
-                logger.info("Updated nifi.properties:")
-                logger.info("\n" * 2 + updatedPropertiesLines.join("\n"))
 
                 // Check that the output values for everything is the same including the sensitive props key
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(workingNiFiPropertiesFile)
                 assert updatedProperties.size() == inputProperties.size()
                 originalSensitiveValues.every { String key, String originalValue ->
                     assert updatedProperties.getProperty(key) == originalValue
@@ -3621,7 +3578,6 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 String updatedKeyLine = updatedBootstrapLines.find {
                     it.startsWith(ConfigEncryptionTool.BOOTSTRAP_KEY_PREFIX)
                 }
-                logger.info("Updated key line: ${updatedKeyLine}")
 
                 assert updatedKeyLine == EXPECTED_KEY_LINE
                 assert originalBootstrapLines.size() == updatedBootstrapLines.size()
@@ -3635,20 +3591,12 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 assert migratedFlowXmlContent != ORIGINAL_FLOW_XML_CONTENT
 
                 // Verify that the cipher texts decrypt correctly
-                logger.info("Original flow.xml.gz cipher texts: ${originalFlowCipherTexts}")
                 def migratedFlowCipherTexts = findFieldsInStream(migratedFlowXmlContent, WFXCTR)
-                logger.info("Updated  flow.xml.gz cipher texts: ${migratedFlowCipherTexts}")
                 assert migratedFlowCipherTexts.size() == CIPHER_TEXT_COUNT
             }
         })
 
-        // Act
         ConfigEncryptionTool.main(args)
-        logger.info("Invoked #main with ${args.join(" ")}")
-
-        // Assert
-
-        // Assertions defined above
     }
 
     /**
@@ -3704,7 +3652,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
 
         final String SENSITIVE_PROTECTION_KEY = ApplicationPropertiesProtector.getProtectionKey(NiFiProperties.SENSITIVE_PROPS_KEY)
-        ProtectedNiFiProperties encryptedProperties = niFiPropertiesLoader.readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+        ProtectedNiFiProperties encryptedProperties = niFiPropertiesLoader.loadProtectedProperties(workingNiFiPropertiesFile)
         def originalEncryptedValues = encryptedProperties.getSensitivePropertyKeys().collectEntries { String key -> [(key): encryptedProperties.getProperty(key)] }
         logger.info("Original encrypted values: ${originalEncryptedValues}")
         String originalSensitiveKeyProtectionScheme = encryptedProperties.getProperty(SENSITIVE_PROTECTION_KEY)
@@ -3725,7 +3673,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                         .getProvider(ConfigEncryptionTool.DEFAULT_PROTECTION_SCHEME)
 
                 // Check that the output values for everything is the same except the sensitive props key
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(workingNiFiPropertiesFile)
                 assert updatedProperties.size() == inputProperties.size()
                 String newSensitivePropertyKey = updatedProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_KEY)
 
@@ -3837,7 +3785,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
 
         final String SENSITIVE_PROTECTION_KEY = ApplicationPropertiesProtector.getProtectionKey(NiFiProperties.SENSITIVE_PROPS_KEY)
-        ProtectedNiFiProperties encryptedProperties = niFiPropertiesLoader.readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+        ProtectedNiFiProperties encryptedProperties = niFiPropertiesLoader.loadProtectedProperties(workingNiFiPropertiesFile)
         def originalEncryptedValues = encryptedProperties.getSensitivePropertyKeys().collectEntries { String key -> [(key): encryptedProperties.getProperty(key)] }
         logger.info("Original encrypted values: ${originalEncryptedValues}")
         String originalSensitiveKeyProtectionScheme = encryptedProperties.getProperty(SENSITIVE_PROTECTION_KEY)
@@ -3858,7 +3806,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                         .getProvider(ConfigEncryptionTool.DEFAULT_PROTECTION_SCHEME)
 
                 // Check that the output values for everything is the same except the sensitive props key
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(workingNiFiPropertiesFile)
                 assert updatedProperties.size() == inputProperties.size()
                 String newSensitivePropertyKey = updatedProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_KEY)
 
@@ -3972,7 +3920,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         logger.info("Original sensitive values: ${originalSensitiveValues}")
 
         final String SENSITIVE_PROTECTION_KEY = ApplicationPropertiesProtector.getProtectionKey(NiFiProperties.SENSITIVE_PROPS_KEY)
-        ProtectedNiFiProperties encryptedProperties = niFiPropertiesLoader.readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+        ProtectedNiFiProperties encryptedProperties = niFiPropertiesLoader.loadProtectedProperties(workingNiFiPropertiesFile)
         def originalEncryptedValues = encryptedProperties.getSensitivePropertyKeys().collectEntries { String key -> [(key): encryptedProperties.getProperty(key)] }
         logger.info("Original encrypted values: ${originalEncryptedValues}")
         String originalSensitiveKeyProtectionScheme = encryptedProperties.getProperty(SENSITIVE_PROTECTION_KEY)
@@ -4010,7 +3958,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 logger.info("Updated key line: ${updatedSensitiveKeyLine}")
 
                 // Check that the output values for everything are the same except the sensitive props key
-                NiFiProperties updatedProperties = new NiFiPropertiesLoader().readProtectedPropertiesFromDisk(workingNiFiPropertiesFile)
+                NiFiProperties updatedProperties = new NiFiPropertiesLoader().loadProtectedProperties(workingNiFiPropertiesFile)
                 assert updatedProperties.size() == inputProperties.size()
                 String newSensitivePropertyKey = updatedProperties.getProperty(NiFiProperties.SENSITIVE_PROPS_KEY)
 
@@ -4109,8 +4057,8 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         assert migratedCipherTexts.size() == cipherTextCount
 
         // Ensure that everything else is identical
-        assert flowXmlFile.text.replaceAll(WFXCTR, "") ==
-                workingFile.text.replaceAll(WFXCTR, "")
+        assertEquals(removeXmlDeclarationAndComments(flowXmlFile.text).replaceAll(WFXCTR, "").trim(),
+                removeXmlDeclarationAndComments(workingFile.text).replaceAll(WFXCTR, "").trim())
     }
 
 
@@ -4161,8 +4109,8 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
                 assert newCipherTexts.size() == ORIGINAL_CIPHER_TEXT_COUNT
 
                 // Ensure that everything else is identical
-                assert new File(workingFile.path).text.replaceAll(WFXCTR, "") ==
-                        flowXmlFile.text.replaceAll(WFXCTR, "")
+                assertEquals(removeXmlDeclarationAndComments(new File(workingFile.path).text).replaceAll(WFXCTR, "").trim(),
+                        removeXmlDeclarationAndComments(flowXmlFile.text).replaceAll(WFXCTR, "").trim())
 
                 // Update the "source" XML content for the next iteration
                 currentXmlContent = tool.loadFlowXml(workingFile.path)
@@ -4286,7 +4234,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         logger.info("Loaded flow.xml.gz: \n${readXmlContent}")
 
         // Assert
-        assert readXmlContent == xmlContent
+        assert readXmlContent.trim() == xmlContent.trim()
     }
 
     @Test
@@ -4381,37 +4329,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
 
         String[] args = ["-n", inputPropertiesFile.path, "-b", bootstrapFile.path, "-c"]
 
-        exit.checkAssertionAfterwards(new Assertion() {
-            void checkAssertion() {
-                final String standardOutput = systemOutRule.getLog()
-                List<String> lines = standardOutput.split("\n")
-
-                // The SystemRule log also includes STDERR, so truncate after 9 lines
-                def stdoutLines = lines[0..<EXPECTED_CLI_OUTPUT.size()]
-                logger.info("STDOUT:\n\t${stdoutLines.join("\n\t")}")
-
-                // Split the output into lines and create a map of the keys and values
-                def parsedCli = stdoutLines.collectEntries { String line ->
-                    def components = line.split("=", 2)
-                    components.size() > 1 ? [(components[0]): components[1]] : [(components[0]): ""]
-                }
-
-                assert parsedCli.size() == EXPECTED_CLI_OUTPUT.size()
-                assert EXPECTED_CLI_OUTPUT.every { String k, String v -> parsedCli.get(k) == v }
-
-                // Clean up
-                bootstrapFile.deleteOnExit()
-                tmpDir.deleteOnExit()
-            }
-        })
-
-        // Act
         ConfigEncryptionTool.main(args)
-        logger.info("Invoked #main with ${args.join(" ")}")
-
-        // Assert
-
-        // Assertions defined above
     }
 
     @Test
@@ -4720,14 +4638,9 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         invalidOpts.each { String invalid ->
             tool = new ConfigEncryptionTool()
             def args = (invalid + " -c").split(" ")
-            logger.info("Testing with ${args}")
-            def msg = shouldFail(CommandLineParseException) {
+            shouldFail(CommandLineParseException) {
                 tool.parse(args as String[])
             }
-
-            // Assert
-            assert msg == "When '-c'/'--translateCli' is specified, only '-h', '-v', and '-n'/'-b' with the relevant files are allowed"
-            assert systemOutRule.getLog().contains("usage: org.apache.nifi.properties.ConfigEncryptionTool [")
         }
     }
 
@@ -4744,14 +4657,9 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         // Act
         invalidOpts.each { String invalid ->
             def args = (invalid + " -c").split(" ")
-            logger.info("Testing with ${args}")
-            def msg = shouldFail(CommandLineParseException) {
+            shouldFail(CommandLineParseException) {
                 tool.parse(args as String[])
             }
-
-            // Assert
-            assert msg == "When '-c'/'--translateCli' is specified, '-n'/'--niFiProperties' is required (and '-b'/'--bootstrapConf' is required if the properties are encrypted)"
-            assert systemOutRule.getLog().contains("usage: org.apache.nifi.properties.ConfigEncryptionTool [")
         }
     }
 
@@ -4792,5 +4700,7 @@ class ConfigEncryptionToolTest extends GroovyTestCase {
         fieldsFound
     }
 
-// TODO: Test with 128/256-bit available
+    private String removeXmlDeclarationAndComments(final String xmlFlow) {
+        return xmlFlow.replaceAll("<\\?xml.+\\?>", "").replaceAll("(?s)<!--.*?-->", "")
+    }
 }

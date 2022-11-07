@@ -19,7 +19,7 @@ import NfRegistryApi from 'services/nf-registry.api';
 import { Component, ViewChild } from '@angular/core';
 import { FdsSnackBarService } from '@nifi-fds/core';
 import NfRegistryService from 'services/nf-registry.service';
-import { MatDialogRef } from '@angular/material';
+import { MatDialogRef } from '@angular/material/dialog';
 
 /**
  * NfRegistryCreateNewGroup constructor.
@@ -93,7 +93,7 @@ NfRegistryCreateNewGroup.annotations = [
     new Component({
         templateUrl: './nf-registry-create-new-group.html',
         queries: {
-            createNewGroupInput: new ViewChild('createNewGroupInput')
+            createNewGroupInput: new ViewChild('createNewGroupInput', { static: true })
         }
     })
 ];

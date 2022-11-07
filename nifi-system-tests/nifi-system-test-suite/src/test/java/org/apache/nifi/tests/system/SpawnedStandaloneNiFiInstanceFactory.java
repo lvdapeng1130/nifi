@@ -31,17 +31,16 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SpawnedStandaloneNiFiInstanceFactory implements NiFiInstanceFactory {
     private static final Logger logger = LoggerFactory.getLogger(SpawnedStandaloneNiFiInstanceFactory.class);
-
     private final InstanceConfiguration instanceConfig;
 
     public SpawnedStandaloneNiFiInstanceFactory(final InstanceConfiguration instanceConfig) {
@@ -127,14 +126,7 @@ public class SpawnedStandaloneNiFiInstanceFactory implements NiFiInstanceFactory
             if (!destinationCertsDir.exists()) {
                 assertTrue(destinationCertsDir.mkdirs());
             }
-
-            // Copy keystore
-            final File destinationKeystore = new File(destinationCertsDir, "keystore.jks");
-            Files.copy(Paths.get("src/test/resources/keystore.jks"), destinationKeystore.toPath());
-
-            // Copy truststore
-            final File destinationTruststore = new File(destinationCertsDir, "truststore.jks");
-            Files.copy(Paths.get("src/test/resources/truststore.jks"), destinationTruststore.toPath());
+            NiFiSystemKeyStoreProvider.configureKeyStores(destinationCertsDir);
 
             final File flowXmlGz = instanceConfiguration.getFlowXmlGz();
             if (flowXmlGz != null) {
@@ -197,15 +189,14 @@ public class SpawnedStandaloneNiFiInstanceFactory implements NiFiInstanceFactory
             while (true) {
                 try {
                     client.getFlowClient().getRootGroupId();
-                    logger.info("Startup Completed NiFi [{}]", instanceDirectory.getName());
+                    logger.info("NiFi Startup Completed [{}]", instanceDirectory.getName());
                     return;
                 } catch (final Exception e) {
                     try {
-                        Thread.sleep(100L);
+                        Thread.sleep(1000L);
                     } catch (InterruptedException ex) {
+                        logger.debug("NiFi Startup sleep interrupted", ex);
                     }
-
-                    continue;
                 }
             }
         }
@@ -213,14 +204,15 @@ public class SpawnedStandaloneNiFiInstanceFactory implements NiFiInstanceFactory
         @Override
         public void stop() {
             if (runNiFi == null) {
+                logger.info("NiFi Shutdown Ignored (runNiFi==null) [{}]", instanceDirectory.getName());
                 return;
             }
 
-            logger.info("Shutdown Started NiFi [{}]", instanceDirectory.getName());
+            logger.info("NiFi Shutdown Started [{}]", instanceDirectory.getName());
 
             try {
                 runNiFi.stop();
-                logger.info("Shutdown Completed NiFi [{}]", instanceDirectory.getName());
+                logger.info("NiFi Shutdown Completed [{}]", instanceDirectory.getName());
             } catch (IOException e) {
                 throw new RuntimeException("Failed to stop NiFi", e);
             } finally {
@@ -290,6 +282,26 @@ public class SpawnedStandaloneNiFiInstanceFactory implements NiFiInstanceFactory
             final File propertiesFile = new File(configDir, "nifi.properties");
             try (final OutputStream fos = new FileOutputStream(propertiesFile)) {
                 currentProperties.store(fos, "");
+            }
+        }
+
+        @Override
+        public void quarantineTroubleshootingInfo(final File destinationDir, final Throwable cause) throws IOException {
+            final String[] dirsToCopy = new String[] { "conf", "logs" };
+            for (final String dirToCopy : dirsToCopy) {
+                copyContents(new File(getInstanceDirectory(), dirToCopy), new File(destinationDir, dirToCopy));
+            }
+
+            if (runNiFi == null) {
+                logger.warn("NiFi instance is not running so will not capture diagnostics for {}", getInstanceDirectory());
+            } else {
+                final File diagnosticsFile = new File(destinationDir, "diagnostics.txt");
+                runNiFi.diagnostics(diagnosticsFile, false);
+            }
+
+            final File causeFile = new File(destinationDir, "test-failure-stack-trace.txt");
+            try (final PrintWriter printWriter = new PrintWriter(causeFile)) {
+                cause.printStackTrace(printWriter);
             }
         }
 

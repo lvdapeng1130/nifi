@@ -32,7 +32,7 @@
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-processor-utils</artifactId>
+            <artifactId>nifi-event-listen</artifactId>
             <version>1.18.0</version>
         </dependency>
         <dependency>
@@ -43,7 +43,6 @@
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
-            <version>2.7</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>

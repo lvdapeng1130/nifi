@@ -16,11 +16,6 @@
  */
 package org.apache.nifi.processors.standard.db.impl;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import com.google.common.base.Preconditions;
 import org.apache.nifi.util.StringUtils;
 
 import java.util.ArrayList;
@@ -49,16 +44,6 @@ public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
     }
 
     @Override
-    public Statement getStatement(Connection con) throws SQLException {
-        return con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
-    }
-
-    @Override
-    public void setFetchSize(final Connection con,Statement statement, Integer fetchSize) throws SQLException {
-        if (fetchSize != null && fetchSize > 0) {
-            statement.setFetchSize(Integer.MIN_VALUE);
-        }
-	}
     public boolean supportsUpsert() {
         return true;
     }
@@ -81,9 +66,15 @@ public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
 
     @Override
     public String getUpsertStatement(String table, List<String> columnNames, Collection<String> uniqueKeyColumnNames) {
-        Preconditions.checkArgument(!StringUtils.isEmpty(table), "Table name cannot be null or blank");
-        Preconditions.checkArgument(columnNames != null && !columnNames.isEmpty(), "Column names cannot be null or empty");
-        Preconditions.checkArgument(uniqueKeyColumnNames != null && !uniqueKeyColumnNames.isEmpty(), "Key column names cannot be null or empty");
+        if (StringUtils.isEmpty(table)) {
+            throw new IllegalArgumentException("Table name cannot be null or blank");
+        }
+        if (columnNames == null || columnNames.isEmpty()) {
+            throw new IllegalArgumentException("Column names cannot be null or empty");
+        }
+        if (uniqueKeyColumnNames == null || uniqueKeyColumnNames.isEmpty()) {
+            throw new IllegalArgumentException("Key column names cannot be null or empty");
+        }
 
         String columns = columnNames.stream()
                 .collect(Collectors.joining(", "));
@@ -110,9 +101,15 @@ public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
 
     @Override
     public String getInsertIgnoreStatement(String table, List<String> columnNames, Collection<String> uniqueKeyColumnNames) {
-        Preconditions.checkArgument(!StringUtils.isEmpty(table), "Table name cannot be null or blank");
-        Preconditions.checkArgument(columnNames != null && !columnNames.isEmpty(), "Column names cannot be null or empty");
-        Preconditions.checkArgument(uniqueKeyColumnNames != null && !uniqueKeyColumnNames.isEmpty(), "Key column names cannot be null or empty");
+        if (StringUtils.isEmpty(table)) {
+            throw new IllegalArgumentException("Table name cannot be null or blank");
+        }
+        if (columnNames == null || columnNames.isEmpty()) {
+            throw new IllegalArgumentException("Column names cannot be null or empty");
+        }
+        if (uniqueKeyColumnNames == null || uniqueKeyColumnNames.isEmpty()) {
+            throw new IllegalArgumentException("Key column names cannot be null or empty");
+        }
 
         String columns = columnNames.stream()
                 .collect(Collectors.joining(", "));

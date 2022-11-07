@@ -18,7 +18,7 @@
 import { Component, ViewChild } from '@angular/core';
 import NfRegistryService from 'services/nf-registry.service';
 import NfRegistryApi from 'services/nf-registry.api';
-import { MatDialogRef } from '@angular/material';
+import { MatDialogRef } from '@angular/material/dialog';
 import { FdsSnackBarService } from '@nifi-fds/core';
 
 /**
@@ -92,7 +92,7 @@ NfRegistryAddUser.annotations = [
     new Component({
         templateUrl: './nf-registry-add-user.html',
         queries: {
-            newUserInput: new ViewChild('newUserInput')
+            newUserInput: new ViewChild('newUserInput', { static: true })
         }
     })
 ];

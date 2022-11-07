@@ -71,15 +71,24 @@
             <artifactId>nifi-property-encryptor</artifactId>
             <version>1.18.0</version>
         </dependency>
-
         <dependency>
-            <groupId>org.apache.nifi.registry</groupId>
-            <artifactId>nifi-registry-data-model</artifactId>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-framework-external-resource-utils</artifactId>
             <version>1.18.0</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.nifi.registry</groupId>
-            <artifactId>nifi-registry-flow-diff</artifactId>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-external-resource-utils</artifactId>
+            <version>1.18.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-security-utils</artifactId>
+            <version>1.18.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-xml-processing</artifactId>
             <version>1.18.0</version>
         </dependency>
         <dependency>
@@ -87,8 +96,11 @@
             <artifactId>nifi-registry-client</artifactId>
             <version>1.18.0</version>
         </dependency>
-
-
+        <dependency>
+            <groupId>org.apache.nifi.registry</groupId>
+            <artifactId>nifi-registry-flow-diff</artifactId>
+            <version>1.18.0</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-mock</artifactId>

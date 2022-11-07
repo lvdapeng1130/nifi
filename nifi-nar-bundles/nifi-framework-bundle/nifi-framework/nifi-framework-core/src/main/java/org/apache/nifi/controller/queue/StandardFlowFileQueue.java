@@ -22,6 +22,7 @@ import org.apache.nifi.controller.repository.FlowFileRepository;
 import org.apache.nifi.controller.repository.FlowFileSwapManager;
 import org.apache.nifi.controller.repository.SwapSummary;
 import org.apache.nifi.controller.repository.claim.ResourceClaimManager;
+import org.apache.nifi.controller.status.FlowFileAvailability;
 import org.apache.nifi.events.EventReporter;
 import org.apache.nifi.flowfile.FlowFilePrioritizer;
 import org.apache.nifi.processor.FlowFileFilter;
@@ -174,7 +175,12 @@ public class StandardFlowFileQueue extends AbstractFlowFileQueue implements Flow
 
     @Override
     public boolean isEmpty() {
-        return queue.getFlowFileQueueSize().isEmpty();
+        return queue.isEmpty();
+    }
+
+    @Override
+    public FlowFileAvailability getFlowFileAvailability() {
+        return queue.getFlowFileAvailability();
     }
 
     @Override

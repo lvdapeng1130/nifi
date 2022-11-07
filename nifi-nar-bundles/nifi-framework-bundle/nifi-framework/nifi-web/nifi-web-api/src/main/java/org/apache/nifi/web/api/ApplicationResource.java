@@ -16,8 +16,8 @@
  */
 package org.apache.nifi.web.api;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.authorization.AuthorizableLookup;
 import org.apache.nifi.authorization.AuthorizeAccess;
@@ -50,11 +50,15 @@ import org.apache.nifi.util.ComponentIdGenerator;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.web.NiFiServiceFacade;
 import org.apache.nifi.web.Revision;
-import org.apache.nifi.web.api.cookie.ApplicationCookieName;
-import org.apache.nifi.web.api.cookie.ApplicationCookieService;
-import org.apache.nifi.web.api.cookie.StandardApplicationCookieService;
+import org.apache.nifi.web.security.cookie.ApplicationCookieName;
+import org.apache.nifi.web.security.cookie.ApplicationCookieService;
+import org.apache.nifi.web.security.cookie.StandardApplicationCookieService;
+import org.apache.nifi.web.api.dto.ControllerServiceDTO;
+import org.apache.nifi.web.api.dto.ControllerServiceReferencingComponentDTO;
 import org.apache.nifi.web.api.dto.RevisionDTO;
 import org.apache.nifi.web.api.entity.ComponentEntity;
+import org.apache.nifi.web.api.entity.ControllerServiceEntity;
+import org.apache.nifi.web.api.entity.ControllerServiceReferencingComponentEntity;
 import org.apache.nifi.web.api.entity.Entity;
 import org.apache.nifi.web.api.entity.TransactionResultEntity;
 import org.apache.nifi.web.security.ProxiedEntitiesUtils;
@@ -134,7 +138,7 @@ public abstract class ApplicationResource {
     private FlowController flowController;
 
     private static final int MAX_CACHE_SOFT_LIMIT = 500;
-    private final Cache<CacheKey, Request<? extends Entity>> twoPhaseCommitCache = CacheBuilder.newBuilder().expireAfterWrite(1, TimeUnit.MINUTES).build();
+    private final Cache<CacheKey, Request<? extends Entity>> twoPhaseCommitCache = Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.MINUTES).build();
 
     protected void forwardToLoginMessagePage(final HttpServletRequest httpServletRequest, final HttpServletResponse httpServletResponse, final String message) throws Exception {
         forwardToMessagePage(httpServletRequest, httpServletResponse, LOGIN_ERROR_TITLE, message);
@@ -367,7 +371,7 @@ public abstract class ApplicationResource {
      */
     protected boolean isTwoPhaseRequest(final HttpServletRequest httpServletRequest) {
         final String transactionId = httpServletRequest.getHeader(RequestReplicator.REQUEST_TRANSACTION_ID_HEADER);
-        return transactionId != null && isConnectedToCluster();
+        return transactionId != null && isClustered();
     }
 
     /**
@@ -718,7 +722,7 @@ public abstract class ApplicationResource {
     }
 
     private <T extends Entity> void phaseOneStoreTransaction(final T requestEntity, final Revision revision, final Set<Revision> revisions) {
-        if (twoPhaseCommitCache.size() > MAX_CACHE_SOFT_LIMIT) {
+        if (twoPhaseCommitCache.estimatedSize() > MAX_CACHE_SOFT_LIMIT) {
             throw new IllegalStateException("The maximum number of requests are in progress.");
         }
 
@@ -910,6 +914,15 @@ public abstract class ApplicationResource {
         }
 
         throw new NoClusterCoordinatorException();
+    }
+
+    protected Optional<NodeIdentifier> getPrimaryNodeId() {
+        final ClusterCoordinator coordinator = getClusterCoordinator();
+        if (coordinator == null) {
+            throw new NoClusterCoordinatorException();
+        }
+
+        return Optional.ofNullable(coordinator.getPrimaryNode());
     }
 
     protected ReplicationTarget getReplicationTarget() {
@@ -1271,5 +1284,34 @@ public abstract class ApplicationResource {
         // Note: if the URL does not end with a / then Jetty will end up doing a redirect which can cause
         // a problem when being behind a proxy b/c Jetty's redirect doesn't consider proxy headers
         return baseUrl + "/nifi/";
+    }
+
+    protected void stripNonUiRelevantFields(final ControllerServiceEntity serviceEntity) {
+        final ControllerServiceDTO dto = serviceEntity.getComponent();
+        if (dto == null) {
+            return;
+        }
+
+        final Set<ControllerServiceReferencingComponentEntity> referencingEntities = dto.getReferencingComponents();
+        if (referencingEntities == null) {
+            return;
+        }
+
+        referencingEntities.forEach(this::stripNonUiRelevantFields);
+    }
+
+    protected void stripNonUiRelevantFields(final ControllerServiceReferencingComponentEntity entity) {
+        final ControllerServiceReferencingComponentDTO dto = entity.getComponent();
+        if (dto == null) {
+            return;
+        }
+
+        dto.setDescriptors(null);
+        dto.setProperties(null);
+
+        final Set<ControllerServiceReferencingComponentEntity> referencingEntities = dto.getReferencingComponents();
+        if (referencingEntities != null) {
+            referencingEntities.forEach(this::stripNonUiRelevantFields);
+        }
     }
 }

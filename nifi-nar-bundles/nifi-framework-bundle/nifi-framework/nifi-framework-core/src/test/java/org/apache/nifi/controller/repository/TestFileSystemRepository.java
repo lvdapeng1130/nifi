@@ -23,6 +23,7 @@ import org.apache.nifi.controller.repository.claim.StandardContentClaim;
 import org.apache.nifi.controller.repository.claim.StandardResourceClaim;
 import org.apache.nifi.controller.repository.claim.StandardResourceClaimManager;
 import org.apache.nifi.controller.repository.util.DiskUtils;
+import org.apache.nifi.events.EventReporter;
 import org.apache.nifi.processor.DataUnit;
 import org.apache.nifi.stream.io.StreamUtils;
 import org.apache.nifi.util.NiFiProperties;
@@ -45,6 +46,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.text.NumberFormat;
@@ -53,6 +55,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
@@ -64,8 +67,6 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 
 public class TestFileSystemRepository {
-
-    public static final int NUM_REPO_SECTIONS = 1;
 
     public static final File helloWorldFile = new File("src/test/resources/hello.txt");
 
@@ -87,7 +88,7 @@ public class TestFileSystemRepository {
         }
         repository = new FileSystemRepository(nifiProperties);
         claimManager = new StandardResourceClaimManager();
-        repository.initialize(claimManager);
+        repository.initialize(new StandardContentRepositoryContext(claimManager, EventReporter.NO_OP));
         repository.purge();
     }
 
@@ -127,6 +128,67 @@ public class TestFileSystemRepository {
         System.out.println("Took " + millis + " millis to write " + contentSize + " bytes " + iterations + " times (total of "
                 + NumberFormat.getNumberInstance(Locale.US).format(bytesToWrite) + " bytes) for a write rate of " + mbps + " MB/s");
     }
+
+    @Test
+    public void testIsArchived() {
+        assertFalse(repository.isArchived(Paths.get("1.txt")));
+        assertFalse(repository.isArchived(Paths.get("a/1.txt")));
+        assertFalse(repository.isArchived(Paths.get("a/b/1.txt")));
+        assertFalse(repository.isArchived(Paths.get("a/archive/b/c/1.txt")));
+
+        assertTrue(repository.isArchived(Paths.get("archive/1.txt")));
+        assertTrue(repository.isArchived(Paths.get("a/archive/1.txt")));
+        assertTrue(repository.isArchived(Paths.get("a/b/c/archive/1.txt")));
+    }
+
+    @Test
+    public void testUnreferencedFilesAreArchivedOnCleanup() throws IOException {
+        final Map<String, Path> containerPaths = nifiProperties.getContentRepositoryPaths();
+        assertTrue(containerPaths.size() > 0);
+
+        for (final Map.Entry<String, Path> entry : containerPaths.entrySet()) {
+            final String containerName = entry.getKey();
+            final Path containerPath = entry.getValue();
+
+            final Path section1 = containerPath.resolve("1");
+            final Path file1 = section1.resolve("file-1");
+            Files.write(file1, "hello".getBytes(), StandardOpenOption.CREATE);
+
+            // Should be nothing in the archive at this point
+            assertEquals(0, repository.getArchiveCount(containerName));
+
+            // When we cleanup, we should see one file moved to archive
+            repository.cleanup();
+            assertEquals(1, repository.getArchiveCount(containerName));
+        }
+    }
+
+    @Test
+    public void testAlreadyArchivedFilesCounted() throws IOException {
+        // We want to make sure that the initialization code counts files in archive, so we need to create a new FileSystemRepository to do this.
+        repository.shutdown();
+
+        final Map<String, Path> containerPaths = nifiProperties.getContentRepositoryPaths();
+        assertTrue(containerPaths.size() > 0);
+
+        for (final Path containerPath : containerPaths.values()) {
+            final Path section1 = containerPath.resolve("1");
+            final Path archive = section1.resolve("archive");
+            Files.createDirectories(archive);
+
+            for (int i=0; i < 3; i++) {
+                final Path file1 = archive.resolve("file-" + i);
+                Files.write(file1, "hello".getBytes(), StandardOpenOption.CREATE);
+            }
+        }
+
+        repository = new FileSystemRepository(nifiProperties);
+
+        for (final String containerName : containerPaths.keySet()) {
+            assertEquals(3, repository.getArchiveCount(containerName));
+        }
+    }
+
 
     @Test
     public void testContentNotFoundExceptionThrownIfResourceClaimTooShort() throws IOException {
@@ -183,7 +245,7 @@ public class TestFileSystemRepository {
             bogus.setReadable(false);
 
             repository = new FileSystemRepository(nifiProperties);
-            repository.initialize(new StandardResourceClaimManager());
+            repository.initialize(new StandardContentRepositoryContext(new StandardResourceClaimManager(), EventReporter.NO_OP));
         } finally {
             bogus.setReadable(true);
             assertTrue(bogus.delete());
@@ -267,7 +329,7 @@ public class TestFileSystemRepository {
         Thread.sleep(1000L);
 
         repository = new FileSystemRepository(nifiProperties);
-        repository.initialize(new StandardResourceClaimManager());
+        repository.initialize(new StandardContentRepositoryContext(new StandardResourceClaimManager(), EventReporter.NO_OP));
         repository.purge();
 
         final ContentClaim claim2 = repository.create(false);
@@ -567,7 +629,7 @@ public class TestFileSystemRepository {
             };
 
             final StandardResourceClaimManager claimManager = new StandardResourceClaimManager();
-            repository.initialize(claimManager);
+            repository.initialize(new StandardContentRepositoryContext(claimManager, EventReporter.NO_OP));
             repository.purge();
 
             final ContentClaim claim = repository.create(false);
@@ -621,7 +683,7 @@ public class TestFileSystemRepository {
             };
 
             final StandardResourceClaimManager claimManager = new StandardResourceClaimManager();
-            repository.initialize(claimManager);
+            repository.initialize(new StandardContentRepositoryContext(claimManager, EventReporter.NO_OP));
             repository.purge();
 
             final ContentClaim claim = repository.create(false);
@@ -699,7 +761,8 @@ public class TestFileSystemRepository {
             };
 
             final StandardResourceClaimManager claimManager = new StandardResourceClaimManager();
-            repository.initialize(claimManager);
+
+            repository.initialize(new StandardContentRepositoryContext(claimManager, EventReporter.NO_OP));
             repository.purge();
 
             final ContentClaim claim = repository.create(false);

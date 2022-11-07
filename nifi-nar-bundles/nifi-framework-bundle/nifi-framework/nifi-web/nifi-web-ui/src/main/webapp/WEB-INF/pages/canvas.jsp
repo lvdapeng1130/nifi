@@ -16,7 +16,7 @@
 --%>
 <%@ page contentType="text/html" pageEncoding="UTF-8" session="false" %>
 <!DOCTYPE html>
-<html>
+<html lang="en">
     <head>
         <title>NiFi</title>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
@@ -61,7 +61,7 @@
         <script type="text/javascript" src="js/jquery/combo/jquery.combo.js?${project.version}"></script>
         <script type="text/javascript" src="js/jquery/modal/jquery.modal.js?${project.version}"></script>
         <script type="text/javascript" src="assets/jquery-minicolors/jquery.minicolors.min.js"></script>
-        <script type="text/javascript" src="assets/lodash-core/distrib/lodash-core.min.js"></script>
+        <script type="text/javascript" src="assets/lodash/lodash.min.js"></script>
         <script type="text/javascript" src="assets/moment/min/moment.min.js"></script>
         <script type="text/javascript" src="assets/qtip2/dist/jquery.qtip.min.js"></script>
         <script type="text/javascript" src="assets/slickgrid/lib/jquery.event.drag-2.3.0.js"></script>
@@ -110,8 +110,10 @@
         <jsp:include page="/WEB-INF/partials/canvas/search-users-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/disable-controller-service-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/enable-controller-service-dialog.jsp"/>
+        <jsp:include page="/WEB-INF/partials/canvas/fetch-parameters-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/new-controller-service-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/new-reporting-task-dialog.jsp"/>
+        <jsp:include page="/WEB-INF/partials/canvas/new-parameter-provider-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/new-parameter-context-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/new-processor-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/new-port-dialog.jsp"/>
@@ -127,6 +129,7 @@
         <jsp:include page="/WEB-INF/partials/canvas/revert-local-changes-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/show-local-changes-dialog.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/registry-configuration-dialog.jsp"/>
+        <jsp:include page="/WEB-INF/partials/canvas/new-registry-client-dialog.jsp"/>
         <div id="canvas-container" class="unselectable"></div>
         <div id="canvas-tooltips">
             <div id="processor-tooltips"></div>
@@ -141,6 +144,7 @@
         <jsp:include page="/WEB-INF/partials/canvas/shell.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/controller-service-configuration.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/reporting-task-configuration.jsp"/>
+        <jsp:include page="/WEB-INF/partials/canvas/parameter-provider-configuration.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/processor-configuration.jsp"/>
         <jsp:include page="/WEB-INF/partials/processor-details.jsp"/>
         <jsp:include page="/WEB-INF/partials/canvas/variable-configuration.jsp"/>

@@ -61,22 +61,11 @@
                 <artifactId>calcite-core</artifactId>
                 <version>${calcite.version}</version>
             </dependency>
-            <!-- Override jackson -->
+            <!-- Override Apache Calcite Avatica subproject version for Hive 3 -->
             <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-annotations</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-core</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <!-- Override snakeyaml:1.17 -->
-            <dependency>
-                <groupId>org.yaml</groupId>
-                <artifactId>snakeyaml</artifactId>
-                <version>1.29</version>
+                <groupId>org.apache.calcite.avatica</groupId>
+                <artifactId>avatica</artifactId>
+                <version>${avatica.version}</version>
             </dependency>
             <!-- Override commons-compress -->
             <dependency>
@@ -96,35 +85,23 @@
                 <artifactId>derby</artifactId>
                 <version>10.14.2.0</version>
             </dependency>
-            <!-- Override log4j 2.10.0 -->
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-bom</artifactId>
-                <version>2.14.1</version>
-                <scope>import</scope>
-                <type>pom</type>
-            </dependency>
             <!-- Override zookeeper -->
             <dependency>
                 <groupId>org.apache.zookeeper</groupId>
                 <artifactId>zookeeper</artifactId>
-                <version>3.4.14</version>
+                <version>${zookeeper.version}</version>
             </dependency>
-            <!-- Override Netty 4 -->
+            <!-- Override ant -->
             <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-buffer</artifactId>
-                <version>${netty.4.version}</version>
+                <groupId>org.apache.ant</groupId>
+                <artifactId>ant</artifactId>
+                <version>1.10.12</version>
             </dependency>
+            <!-- Override Xerces 2.9.1 in Hive 1.1 and 1.2 -->
             <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-common</artifactId>
-                <version>${netty.4.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-all</artifactId>
-                <version>${netty.4.version}</version>
+                <groupId>xerces</groupId>
+                <artifactId>xercesImpl</artifactId>
+                <version>2.12.2</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -132,11 +109,12 @@
     <properties>
         <hive11.version>1.1.1</hive11.version>
         <hive11.hadoop.version>2.6.2</hive11.hadoop.version>
-        <hive12.version>1.2.1</hive12.version>
+        <hive12.version>1.2.2</hive12.version>
         <hive12.hadoop.version>2.6.2</hive12.hadoop.version>
-        <hive3.version>3.1.2</hive3.version>
+        <hive3.version>3.1.3</hive3.version>
         <hive.version>${hive3.version}</hive.version>
-        <calcite.version>1.27.0</calcite.version>
+        <avatica.version>1.22.0</avatica.version>
+        <calcite.version>1.32.0</calcite.version>
         <calcite.avatica.version>1.6.0</calcite.avatica.version>
     </properties>
 
@@ -154,5 +132,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>

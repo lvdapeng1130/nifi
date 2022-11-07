@@ -62,9 +62,13 @@ high-level description of the most common extension points:
       monitoring information, and internal NiFi state to be published to external
       endpoints, such as log files, e-mail, and remote web services.
 
+- ParameterProvider
+    * The ParameterProvider interface allows Parameters to be provided by external sources.  Provided parameters
+      are still stored in Parameter Contexts, but this mechanism allows them to be provided and managed externally.
+
 - ControllerService
     * A ControllerService provides shared state and functionality across Processors, other ControllerServices,
-      and ReportingTasks within a single JVM. An example use case may include loading a very
+      Parameter Providers, and ReportingTasks within a single JVM. An example use case may include loading a very
       large dataset into memory. By performing this work in a ControllerService, the data
       can be loaded once and be exposed to all Processors via this service, rather than requiring
       many different Processors to load the dataset themselves.
@@ -177,7 +181,7 @@ Processors to run without consuming resources unnecessarily.
 [[property_descriptor]]
 ==== PropertyDescriptor
 PropertyDescriptor defines a property that is to be used by a
-Processor, ReportingTask, or ControllerService.
+Processor, ReportingTask, ParameterProvider, or ControllerService.
 The definition of a property includes its name, a description of the
 property, an optional default value,
 validation logic, and an indicator as to whether or not the property
@@ -326,21 +330,47 @@ instance of the `PropertyDescriptor.Builder` object,
 calling the appropriate methods on the builder, and finally calling
 the `build` method.
 
-While this method covers most of the use cases, it is sometimes
+===== Dynamic Processor Properties
+
+In addition to standard properties, it is sometimes
 desirable to allow users to configure
-additional properties whose name are not known. This can be achieved
-by overriding the
+additional properties whose names are not predefined.
+This can be achieved by overriding the
 `getSupportedDynamicPropertyDescriptor` method. This method takes a
 `String` as its only argument, which
 indicates the name of the property. The method returns a
 `PropertyDescriptor` object that can be used to validate
 both the name of the property, as well as the value. Any
 PropertyDescriptor that is returned from this method
-should be built setting the value of `isDynamic` to true in the
+should be built setting the value of `isDynamic` to `true` in the
 `PropertyDescriptor.Builder` class. The default
 behavior of AbstractProcessor is to not allow any dynamically created
 properties.
 
+===== Sensitive Dynamic Properties
+
+The default implementation for dynamic properties does not treat the
+property values as sensitive. This approach is sufficient when configuring
+features such as FlowFile attributes or custom expressions, but it does
+not provide protection for values such as passwords or keys.
+
+NiFi 1.17.0 introduced framework support for sensitive dynamic properties
+through a new behavior annotation named `SupportsSensitiveDynamicProperties`.
+The annotation can be applied to a Processor, Controller Service, or
+Reporting Task that supports dynamic properties through the
+`getSupportedDynamicPropertyDescriptor` method. The annotation indicates
+that the component allows individual dynamic properties to be marked as
+sensitive for the purpose of persistence and framework processing.
+
+The `getSupportedDynamicPropertyDescriptor` must return a `PropertyDescriptor`
+with the `sensitive` field set to `false` to allow customization of sensitive
+status. Setting the `sensitive` field to `true` in this method forces all
+dynamic properties to be handled as sensitive. This approach allows sensitive
+status to be upgraded in supported components, but not downgraded.
+
+Secure handling of sensitive property values is the responsibility of the
+annotated class. Components that support sensitive dynamic properties must
+not log property values or provide property values as FlowFile attributes.
 
 ==== Validating Processor Properties
 
@@ -485,7 +515,7 @@ Annotations may be applied to Java methods in a NiFi component to
 indicate to
 the framework when the methods should be called. For the discussion of
 Component Lifecycle, we will define a NiFi component as a
-Processor, ControllerServices, or ReportingTask.
+Processor, ControllerServices, ParameterProviders, or ReportingTask.
 
 ==== @OnAdded
 
@@ -520,9 +550,9 @@ without throwing anything.
 Methods using this annotation must take either 0 arguments or a single argument
 of type `org.apache.nifi.controller.ConfigurationContext`.
 
-Note that this annotation will be ignored if applied to a ReportingTask or
-Processor. For a Controller Service, enabling and disabling are considered
-lifecycle events, as the action makes them usable or unusable by other
+Note that this annotation will be ignored if applied to a ReportingTask,
+Parameter Provider, or Processor. For a Controller Service, enabling and disabling
+are considered lifecycle events, as the action makes them usable or unusable by other
 components. However, for a Processor and a Reporting Task, these are not
 lifecycle events but rather a mechanism to allow a component to be excluded
 when starting or stopping a group of components.
@@ -884,7 +914,7 @@ Often Processors and ControllerServices are related to one another.  Sometimes i
 Sometimes a Processor uses a ControllerService like `InvokeHTTP` and `StandardSSLContextService`.  Sometimes one ControllerService uses another
 like `DistributedMapCacheClientService` and `DistributedMapCacheServer`.  Developers of these extension points may relate these
 different components using the `SeeAlso` tag.  This annotation links these components in the documentation.
-`SeeAlso` can be applied to Processors, ControllerServices and ReportingTasks.  An example of how to do this is listed below:
+`SeeAlso` can be applied to Processors, ControllerServices, ParameterProviders, and ReportingTasks.  An example of how to do this is listed below:
 
 [source, java]
 ----
@@ -913,7 +943,7 @@ to provide a rich explanation of what this Processor is doing, what kind of
 data it expects and produces, and what FlowFile attributes it expects and produces.
 Because this documentation is in an HTML format, you may include images and tables
 to best describe this component.  The same methods can be used to provide advanced
-documentation for Processors, ControllerServices and ReportingTasks.
+documentation for Processors, ControllerServices, ParameterProviders, and ReportingTasks.
 
 [[provenance_events]]
 == Provenance Events
@@ -1902,14 +1932,15 @@ Controller Service's interface. See <<nars>> for more information.
 === Interacting with a ControllerService
 
 ControllerServices may be obtained by a Processor, another
-ControllerService, or a ReportingTask
+ControllerService, a ParameterProvider, or a ReportingTask
 by means of the ControllerServiceLookup or by using the
 `identifiesControllerService` method of the
 PropertyDescriptor's Builder class. The ControllerServiceLookup can be
 obtained by a Processor from the
 ProcessorInitializationContext that is passed to the `initialize`
 method. Likewise, it is obtained by
-a ControllerService from the ControllerServiceInitializationContext
+a ControllerService from the ControllerServiceInitializationContext,
+a ParameterProvider from the ParameterProviderInitializationContext,
 and by a ReportingTask via the
 ReportingConfiguration object passed to the `initialize` method.
 
@@ -1932,7 +1963,7 @@ public static final PropertyDescriptor SSL_CONTEXT_SERVICE = new PropertyDescrip
 Using this method, the user will be prompted to supply the SSL Context
 Service that should be used. This is
 done by providing the user with a drop-down menu from which they are
-able to choose any of the SSLContextService
+able to choose any of the `SSLContextService`
 configurations that have been configured, regardless of the implementation.
 
 In order to make use of this service, the Processor can use code such as:
@@ -1979,7 +2010,7 @@ ReportingTask interface exposes methods for
 configuration, validation, and initialization. These methods are all
 identical to those of the
 Processor and ControllerService interfaces except that the
-`initialize` method is passed a `ReportingConfiguration`
+`initialize` method is passed a `ReportingInitializationContext`
 object, as opposed to the initialization objects received by the other
 Components. The ReportingTask also has
 an `onTrigger` method that is invoked by the framework to trigger the
@@ -2022,6 +2053,44 @@ event describes. This provides a great deal of information to
 ReportingTasks, allowing reports to be generated
 in many different ways to expose metrics and monitoring capabilities
 needed for any number of operational concerns.
+
+== Parameter Providers
+
+Although Parameter Contexts cannot be extended, the `ParameterProvider`
+interface allows an extension point for providing parameters to
+Parameter Contexts.  Parameter Providers can fetch groups of parameters
+that can be mapped to new Parameter Contexts, which can then be kept
+up to date by re-fetching the parameters.
+
+This extensibility allows parameters to be both initially provided and
+managed external to NiFi.
+
+
+=== Developing a Parameter Provider
+
+The ParameterProvider interface exposes methods for
+configuration, validation, and initialization. These methods are all
+identical to those of the Processor and ControllerService interfaces except that the
+`initialize` method is passed a `ParameterProviderInitializationContext`
+object, as opposed to the initialization objects received by the other
+Components. The ParameterProvider also has a `fetchParameters` method that is invoked
+by the framework to fetch the parameters from its source.
+
+Fetched parameters are returned in `ParameterGroup` s, each of which has
+a group name and a list of parameters.  Parameter Groups may be mapped by the user
+to Parameter Contexts.  This allows a single `ParameterProvider` instance to provide different
+parameters to multiple Parameter Contexts based on their mappings.
+
+Within the `fetchParameters` method, the ParameterProvider is given access to a
+`ConfigurationContext`, from which configuration
+and information about the NiFi instance can be obtained. The
+ControllerServiceLookup that is accessible via the Context provides
+access to ControllerServices that have been
+configured. However, this method of obtaining Controller Services is
+not the preferred method. Rather, the
+preferred method for obtaining a Controller Service is to reference
+the Controller Service in a PropertyDescriptor,
+as is discussed in the <<interacting-with-controller-service>> section.
 
 == UI Extensions
 
@@ -2380,7 +2449,7 @@ This is included by adding the following snippet to the NAR's pom.xml:
         <plugin>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-nar-maven-plugin</artifactId>
-            <version>1.1.0</version>
+            <version>1.3.4</version>
             <extensions>true</extensions>
         </plugin>
     </plugins>
@@ -2483,7 +2552,7 @@ far less complicated. Note here that the
 This is done so that any NAR that has a dependency on
 `my-controller-service-api-nar` will also be able to access
 all of the Controller Services that are provided by the
-`nifi-standard-services-api-nar`, such as the SSLContextService.
+`nifi-standard-services-api-nar`, such as the `SSLContextService`.
 In this same vein, it is not necessary to create a different
 "service-api" NAR for each service. Instead, it often
 makes sense to have a single "service-api" NAR that encapsulates the
@@ -2530,8 +2599,8 @@ directories, an OS-handled temporary copy is created and cached before loading i
 and classloader isolation.
 
 Each property may impose further restrictions on the format of the value through the validators.
-For example, using StandardValidators.FILE_EXISTS_VALIDATOR restricts the property to accepting a
-single file. Using StandardValidators.NON_EMPTY_VALIDATOR allows any combination of comma-separated
+For example, using `StandardValidators.FILE_EXISTS_VALIDATOR` restricts the property to accepting a
+single file. Using `StandardValidators.NON_EMPTY_VALIDATOR` allows any combination of comma-separated
 files or directories.
 
 Resources are added to the instance ClassLoader by adding them to an inner ClassLoader that is always
@@ -2545,17 +2614,17 @@ component's NAR ClassLoader. When `@RequiresInstanceClassLoading` is not present
 instance ClassLoader simply has its parent ClassLoader set to the NAR ClassLoader, rather than
 copying resources.
 
-The `@RequiresInstanceClassLoading` annotation also provides an optional flag `cloneAncestorResources'. If
+The `@RequiresInstanceClassLoading` annotation also provides an optional flag `cloneAncestorResources`. If
 set to true, the instance ClassLoader will include ancestor resources up to the first ClassLoader containing a
 controller service API referenced by the component, or up to the Jetty NAR. If set to false, or not specified,
 only the resources from the component's NAR will be included.
 
-Because @RequiresInstanceClassLoading copies resources from the NAR ClassLoader for each instance of the
+Because `@RequiresInstanceClassLoading` copies resources from the NAR ClassLoader for each instance of the
 component, use this capability judiciously. If ten instances of one component are created, all classes
 from the component's NAR ClassLoader are loaded into memory ten times. This could eventually increase the
 memory footprint significantly when enough instances of the component are created.
 
-Additionally, there are some restrictions when using @RequiresInstanceClassLoading when using Controller
+Additionally, there are some restrictions when using `@RequiresInstanceClassLoading` when using Controller
 Services. Processors, Reporting Tasks, and Controller Services can reference a Controller Service API
 in one of its Property Descriptors. An issue may arise when the Controller Service API is bundled in the same
 NAR with a component that references it or with the Controller Service implementation. If either of these cases
@@ -2563,25 +2632,116 @@ are encountered and the extension requires instance classloading, the extension 
 ERROR will be logged. To address this issue, the Controller Service API should be bundled in a parent NAR. The
 service implementation and extensions that reference that service should depend on the Controller Service API NAR.
 Please refer to the Controller Service NAR Layout in the <<nars>> section. Anytime a Controller Service API is
-bundled with an extension that requires it, even if @RequiresInstanceClassLoading isn't used, a WARNING will be
+bundled with an extension that requires it, even if `@RequiresInstanceClassLoading` isn't used, a WARNING will be
 logged to help avoid this bad practice.
 
 
 [[deprecation]]
-== Deprecating a Component
+== Deprecating Components and Features
+Deprecating features is an important part of the software development lifecycle, providing an upgrade path for
+developers and users to follow.
+
+Apache NiFi follows the link:https://semver.org[Semantic Versioning Specification 2.0.0^] for features identified as
+part of the public version contract according to
+link:https://cwiki.apache.org/confluence/display/NIFI/Version+Scheme+and+API+Compatibility[Version Scheme]
+documentation.
+
+Components and features that fit under the public version contract require deprecation marking prior to removal. This
+approach allows developers to implement changes as part of minor version upgrades, in preparation for future removal
+of features in a subsequent major version.
+
+=== Component Deprecation
+
 Sometimes it may be desirable to deprecate a component. Whenever this occurs the developer may use the
- @DeprecationNotice annotation to indicate that a component has been deprecated, allowing the developer
- to describe a reason for the deprecation and suggest alternative components. An example of how to do this can
+ `@DeprecationNotice` annotation to indicate that a component has been deprecated, allowing the developer
+ to describe a `reason` for the deprecation and suggest alternative components. An example of how to do this can
  be found below:
 
 [source, java]
 ----
- @DeprecationNotice(alternatives = {ListenSyslog.class}, classNames = {"org.apache.nifi.processors.standard.ListenRELP"}, reason = "Technology has been superseded",  )
- public class ListenOldProtocol extends AbstractProcessor {
+@DeprecationNotice(
+        reason = "Legacy Protocol has been superseded",
+        alternatives = {ListenSyslog.class},
+        classNames = {"org.apache.nifi.processors.standard.ListenRELP"}
+)
+public class ListenLegacyProtocol extends AbstractProcessor {}
 ----
-As you can see, the alternatives can be used to define and array of alternative Components, while classNames can be
-used to represent the similar content through an array of strings.
+The `alternatives` property can be used to define an array of recommended replacement Components, while `classNames`
+can be used to represent similar content through an array of class name strings.
 
+Adding the `@DeprecationNotice` annotation renders a warning message in generated documentation and also logs the
+following warning when the Flow Configuration includes the component:
+
+----
+Added Deprecated Component ListenLegacyProtocol[id=929a52c7-1e3e-423e-b303-6ca2ef657617] See alternatives [ListenSyslog,ListenRELP]
+----
+
+=== Feature Deprecation
+
+Deprecating features includes changing component configuration strategies, introducing new repository classes, and
+refactoring a Controller Service interface. Removing component properties can create invalid Flow Configurations after
+upgrading, and removing public methods from a Controller Service interface can break components compiled against
+previous versions. For these reasons, introducing new properties and methods must include a deprecation strategy that
+supports compatibility when upgrading from one minor version to another.
+
+Annotating methods and properties with the Java `@Deprecated` annotation provides a warning to software developers, but
+does not provide any information to users. Adding selective deprecation logging provides a method for users to determine
+whether the current Flow Configuration uses deprecated properties or features.
+
+=== Deprecation Logging
+
+The `nifi-deprecation-log` module provides an abstraction for logging deprecation warnings. The `DeprecationLogger`
+interface has a `warn()` method that accepts a message string with a variable number of arguments. The standard
+implementation delegates to SLF4J, supporting standard features for providing and resolving placeholder arguments. The
+standard `DeprecationLogger` implementation also logs a `DeprecationException` with the referenced class, supporting
+tracing to the usage location.
+
+Instantiating a `DeprecationLogger` follows the same conventions as instantiating an SLF4J `Logger`:
+
+[source, java]
+----
+private static final DeprecationLogger deprecationLogger = DeprecationLoggerFactory.getLogger(Service.class);
+----
+
+Logging warnings for deprecated extension component properties and methods should include the simple class name and the
+component identifier for tracing. Warning messages should also reference recommended alternatives.
+
+[source, java]
+----
+deprecationLogger.warn(
+        "{}[id={}] createServiceContext() should be replaced with createContext()",
+        getClass().getSimpleName(),
+        getIdentifier()
+);
+----
+
+[[build]]
+== Build Options
+=== Maven Profiles
+
+[options="header,footer"]
+|==================================================================================================================================================
+| Package                                         | Maven Profile       | Description
+| Apache Accumulo Bundle | include-accumulo   | Adds support for https://accumulo.apache.org[Apache Accumulo].
+| Apache Atlas Bundle | include-atlas | Adds support for the Apache Atlas data governance tool. The functionality from this bundle is based around reporting tasks that integrate with https://atlas.apache.org[Apache Atlas].
+| Apache Hive 1.1 Bundle | include-hive1_1 | Adds support for Apache Hive 1.1.X.
+| Apache Hive 3 Bundle | include-hive3 | Adds support for Apache Hive 3.X
+| Apache Ranger Bundle | include-ranger | Adds support for https://ranger.apache.org[Apache Ranger].
+| ASN1 Support | include-asn1 | Adds support for ASN1
+| Contribution Check | contrib-check | Runs various quality checks that are required to be accepted before a contribution can be accepted into the core NiFi code base.
+| Graph Database Bundle | include-graph     | Adds support for various common graph database scenarios. Support is currently for https://neo4j.com/developer/cypher[Cypher] and https://tinkerpop.apache.org/gremlin.html[Gremlin]-compatible databases such as Neo4J and JanusGraph. Includes controller services that provide driver functionality and a suite of processors for ingestion and querying.
+| GRPC Bundle | include-grpc | **This profile is active in official builds and should be active** Provides support for the GRPC protocol.
+| Media Bundle | include-media | The media bundle provides functionality based on https://tika.apache.org[Apache Tika] for extracting content and metadata from various types of binary formats supported by Apache Tika (ex. PDF, Microsoft Office).
+| Rules Engine Bundle | include-rules | Adds support for creating scripted rules engines that can be integrated into existing flows. These rules engines can provide flexibility to people who need more complex flow logic or are more comfortable with flow decision-making using custom code.
+| Snowflake Bundle | include-snowflake | Adds support for integration with the https://www.snowflake.com[Snowflake platform].
+| SQL Reporting Bundle | include-sql-reporting | Adds reporting tasks that are designed to use SQL to update a RDBMS with metrics and other related data from Apache NiFi.
+|==================================================================================================================================================
+
+=== Standard Build Instructions
+
+The following command is used to generate a standard binary distribution of Apache NiFi:
+
+`mvn clean install -Pinclude-grpc,contrib-check`
 
 == How to contribute to Apache NiFi
 

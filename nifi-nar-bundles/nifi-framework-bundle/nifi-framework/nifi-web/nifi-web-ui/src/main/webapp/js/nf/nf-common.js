@@ -23,7 +23,7 @@
         define(['jquery',
                 'd3',
                 'nf.AuthorizationStorage',
-                'lodash-core',
+                'lodash',
                 'moment'],
             function ($, d3, nfAuthorizationStorage, _, moment) {
                 return (nf.Common = factory($, d3, nfAuthorizationStorage, _, moment));
@@ -32,7 +32,7 @@
         module.exports = (nf.Common = factory(require('jquery'),
             require('d3'),
             require('nf.AuthorizationStorage'),
-            require('lodash-core'),
+            require('lodash'),
             require('moment')));
     } else {
         nf.Common = factory(root.$,
@@ -63,6 +63,11 @@
         $(document).on('click', 'div.nf-checkbox', function () {
             var checkbox = $(this);
             var transitionToChecked = checkbox.hasClass('checkbox-unchecked');
+            var isDisabled = checkbox.hasClass('disabled');
+
+            if (isDisabled) {
+                return;
+            }
 
             if (transitionToChecked) {
                 checkbox.removeClass('checkbox-unchecked').addClass('checkbox-checked');
@@ -997,6 +1002,34 @@
         },
 
         /**
+         * Returns a tooltip for leading and/or trailing whitespace.
+         *
+         * @returns {string}
+         */
+        formatWhitespaceTooltip: function () {
+            return nfCommon.escapeHtml('The specified value contains leading and/or trailing whitespace character(s). ' +
+                'This could produce unexpected results if it was not intentional.');
+
+        },
+
+        /**
+         * Constant regex for leading and/or trailing whitespace.
+         */
+        LEAD_TRAIL_WHITE_SPACE_REGEX: /^[ \s]+|[ \s]+$/,
+
+        /**
+         * Checks the specified value for leading and/or trailing whitespace only.
+         *
+         * @argument {string} value     The value to check
+         */
+        hasLeadTrailWhitespace : function (value) {
+            if (nfCommon.isBlank(value)) {
+                return false;
+            }
+            return nfCommon.LEAD_TRAIL_WHITE_SPACE_REGEX.test(value);
+        },
+
+        /**
          * Formats the specified property (name and value) accordingly.
          *
          * @argument {string} name      The name of the property
@@ -1793,6 +1826,20 @@
             return key.split('.').reduce(function(o,x){
                 return(typeof o === undefined || o === null)? o : (typeof o[x] == 'function')?o[x]():o[x];
             }, obj);
+        },
+
+        /**
+         * Checks if the given value has multi-lines.
+         *
+         * @param value to check
+         * @returns {boolean}
+         */
+        isMultiLine: function (value) {
+            const multiLineMatcher = /\n/.exec(value);
+            if (multiLineMatcher) {
+                return true;
+            }
+            return false;
         }
 
     };

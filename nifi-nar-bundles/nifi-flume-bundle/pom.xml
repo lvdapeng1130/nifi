@@ -21,7 +21,6 @@
         <version>1.18.0</version>
     </parent>
     <artifactId>nifi-flume-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
     <description>A bundle of processors that run Flume sources/sinks</description>
     <modules>
@@ -41,11 +40,11 @@
                 <artifactId>netty</artifactId>
                 <version>${netty.3.version}</version>
             </dependency>
-            <!-- Override Netty 4 -->
+            <!-- Override Tomcat Embed Core 8.5.46 from Flume 1.10.0 -->
             <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-all</artifactId>
-                <version>${netty.4.version}</version>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>8.5.82</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

@@ -16,19 +16,25 @@
  */
 package org.apache.nifi.processors.azure.storage;
 
+import com.azure.core.http.rest.Response;
 import com.azure.storage.file.datalake.DataLakeDirectoryClient;
 import com.azure.storage.file.datalake.DataLakeFileClient;
-import com.google.common.collect.Sets;
-import com.google.common.net.UrlEscapers;
+import com.azure.storage.file.datalake.models.DataLakeRequestConditions;
+import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.nifi.flowfile.FlowFile;
+import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Processor;
+import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.provenance.ProvenanceEventRecord;
 import org.apache.nifi.provenance.ProvenanceEventType;
+import org.apache.nifi.util.MockComponentLog;
 import org.apache.nifi.util.MockFlowFile;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -40,20 +46,23 @@ import static org.apache.nifi.processors.azure.storage.utils.ADLSAttributes.ATTR
 import static org.apache.nifi.processors.azure.storage.utils.ADLSAttributes.ATTR_NAME_FILENAME;
 import static org.apache.nifi.processors.azure.storage.utils.ADLSAttributes.ATTR_NAME_FILESYSTEM;
 import static org.apache.nifi.processors.azure.storage.utils.ADLSAttributes.ATTR_NAME_LENGTH;
-import static org.apache.nifi.processors.azure.storage.utils.ADLSAttributes.ATTR_NAME_PRIMARY_URI;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
 
     private static final String DIRECTORY = "dir1";
     private static final String FILE_NAME = "file1";
-    private static final byte[] FILE_DATA = "0123456789".getBytes();
+    private static final byte[] FILE_DATA = "0123456789".getBytes(StandardCharsets.UTF_8);
 
     private static final String EL_FILESYSTEM = "az.filesystem";
     private static final String EL_DIRECTORY = "az.directory";
@@ -64,7 +73,7 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
         return PutAzureDataLakeStorage.class;
     }
 
-    @Before
+    @BeforeEach
     public void setUp() {
         runner.setProperty(PutAzureDataLakeStorage.DIRECTORY, DIRECTORY);
         runner.setProperty(PutAzureDataLakeStorage.FILE, FILE_NAME);
@@ -73,6 +82,16 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
     @Test
     public void testPutFileToExistingDirectory() throws Exception {
         fileSystemClient.createDirectory(DIRECTORY);
+
+        runProcessor(FILE_DATA);
+
+        assertSuccess(DIRECTORY, FILE_NAME, FILE_DATA);
+    }
+
+    @Test
+    public void testPutFileToExistingDirectoryUsingProxyConfigurationService() throws Exception {
+        fileSystemClient.createDirectory(DIRECTORY);
+        configureProxyService();
 
         runProcessor(FILE_DATA);
 
@@ -209,7 +228,7 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
 
         runProcessor(FILE_DATA);
 
-        assertSuccessWithIgnoreResolution(DIRECTORY, FILE_NAME, FILE_DATA, azureFileContent.getBytes());
+        assertSuccessWithIgnoreResolution(DIRECTORY, FILE_NAME, FILE_DATA, azureFileContent.getBytes(StandardCharsets.UTF_8));
     }
 
     @Test
@@ -244,14 +263,38 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
         assertFailure();
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testPutFileButFailedToAppend() {
-        DataLakeFileClient fileClient = mock(DataLakeFileClient.class);
-        InputStream stream = mock(InputStream.class);
-        doThrow(NullPointerException.class).when(fileClient).append(any(InputStream.class), anyLong(), anyLong());
+        final PutAzureDataLakeStorage processor = new PutAzureDataLakeStorage();
+        final DataLakeFileClient fileClient = mock(DataLakeFileClient.class);
+        final ProcessSession session = mock(ProcessSession.class);
+        final FlowFile flowFile = mock(FlowFile.class);
 
-        PutAzureDataLakeStorage.uploadContent(fileClient, stream, FILE_DATA.length);
+        when(flowFile.getSize()).thenReturn(1L);
+        doThrow(IllegalArgumentException.class).when(fileClient).append(any(InputStream.class), anyLong(), anyLong());
 
+        assertThrows(IllegalArgumentException.class, () -> processor.appendContent(flowFile, fileClient, session));
+        verify(fileClient).delete();
+    }
+
+    @Test
+    public void testPutFileButFailedToRename() {
+        final PutAzureDataLakeStorage processor = new PutAzureDataLakeStorage();
+        final ProcessorInitializationContext initContext = mock(ProcessorInitializationContext.class);
+        final String componentId = "componentId";
+        final DataLakeFileClient fileClient = mock(DataLakeFileClient.class);
+        final Response<DataLakeFileClient> response = mock(Response.class);
+        //Mock logger
+        when(initContext.getIdentifier()).thenReturn(componentId);
+        MockComponentLog componentLog = new MockComponentLog(componentId, processor);
+        when(initContext.getLogger()).thenReturn(componentLog);
+        processor.initialize(initContext);
+        //Mock renameWithResponse Azure method
+        when(fileClient.renameWithResponse(isNull(), anyString(), isNull(), any(DataLakeRequestConditions.class), isNull(), isNull())).thenReturn(response);
+        when(response.getValue()).thenThrow(DataLakeStorageException.class);
+        when(fileClient.getFileName()).thenReturn(FILE_NAME);
+
+        assertThrows(DataLakeStorageException.class, () -> processor.renameFile(FILE_NAME, "", fileClient, false));
         verify(fileClient).delete();
     }
 
@@ -299,14 +342,6 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
         flowFile.assertAttributeEquals(ATTR_NAME_DIRECTORY, directory);
         flowFile.assertAttributeEquals(ATTR_NAME_FILENAME, fileName);
 
-        String urlEscapedDirectory = UrlEscapers.urlPathSegmentEscaper().escape(directory);
-        String urlEscapedFileName = UrlEscapers.urlPathSegmentEscaper().escape(fileName);
-        String urlEscapedPathSeparator = UrlEscapers.urlPathSegmentEscaper().escape("/");
-        String primaryUri = StringUtils.isNotEmpty(directory)
-                ? String.format("https://%s.dfs.core.windows.net/%s/%s%s%s", getAccountName(), fileSystemName, urlEscapedDirectory, urlEscapedPathSeparator, urlEscapedFileName)
-                : String.format("https://%s.dfs.core.windows.net/%s/%s", getAccountName(), fileSystemName, urlEscapedFileName);
-        flowFile.assertAttributeEquals(ATTR_NAME_PRIMARY_URI, primaryUri);
-
         flowFile.assertAttributeEquals(ATTR_NAME_LENGTH, Integer.toString(fileData.length));
     }
 
@@ -336,7 +371,7 @@ public class ITPutAzureDataLakeStorage extends AbstractAzureDataLakeStorageIT {
     }
 
     private void assertProvenanceEvents() {
-        Set<ProvenanceEventType> expectedEventTypes = Sets.newHashSet(ProvenanceEventType.SEND);
+        Set<ProvenanceEventType> expectedEventTypes = Collections.singleton(ProvenanceEventType.SEND);
 
         Set<ProvenanceEventType> actualEventTypes = runner.getProvenanceEvents().stream()
                 .map(ProvenanceEventRecord::getEventType)

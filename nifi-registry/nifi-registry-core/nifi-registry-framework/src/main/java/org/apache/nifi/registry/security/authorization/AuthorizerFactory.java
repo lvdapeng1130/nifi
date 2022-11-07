@@ -18,10 +18,10 @@ package org.apache.nifi.registry.security.authorization;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Validate;
-import org.apache.nifi.properties.PropertyProtectionScheme;
 import org.apache.nifi.properties.SensitivePropertyProtectionException;
 import org.apache.nifi.properties.SensitivePropertyProvider;
 import org.apache.nifi.properties.SensitivePropertyProviderFactory;
+import org.apache.nifi.properties.scheme.StandardProtectionScheme;
 import org.apache.nifi.registry.extension.ExtensionClassLoader;
 import org.apache.nifi.registry.extension.ExtensionCloseable;
 import org.apache.nifi.registry.extension.ExtensionManager;
@@ -35,8 +35,10 @@ import org.apache.nifi.registry.security.exception.SecurityProviderCreationExcep
 import org.apache.nifi.registry.security.exception.SecurityProviderDestructionException;
 import org.apache.nifi.registry.security.identity.IdentityMapper;
 import org.apache.nifi.registry.security.util.ClassLoaderUtils;
-import org.apache.nifi.registry.security.util.XmlUtils;
 import org.apache.nifi.registry.service.RegistryService;
+import org.apache.nifi.xml.processing.ProcessingException;
+import org.apache.nifi.xml.processing.stream.StandardXMLStreamReaderProvider;
+import org.apache.nifi.xml.processing.stream.XMLStreamReaderProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -45,7 +47,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.lang.Nullable;
 import org.springframework.transaction.annotation.Transactional;
-import org.xml.sax.SAXException;
 
 import javax.sql.DataSource;
 import javax.xml.XMLConstants;
@@ -53,7 +54,7 @@ import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBElement;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Unmarshaller;
-import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
@@ -300,9 +301,11 @@ public class AuthorizerFactory implements UserGroupProviderLookup, AccessPolicyP
                 // attempt to unmarshal
                 final Unmarshaller unmarshaller = JAXB_CONTEXT.createUnmarshaller();
                 unmarshaller.setSchema(schema);
-                final JAXBElement<Authorizers> element = unmarshaller.unmarshal(XmlUtils.createSafeReader(new StreamSource(authorizersConfigurationFile)), Authorizers.class);
+                final XMLStreamReaderProvider provider = new StandardXMLStreamReaderProvider();
+                final XMLStreamReader reader = provider.getStreamReader(new StreamSource(authorizersConfigurationFile));
+                final JAXBElement<Authorizers> element = unmarshaller.unmarshal(reader, Authorizers.class);
                 return element.getValue();
-            } catch (XMLStreamException | SAXException | JAXBException e) {
+            } catch (final ProcessingException | JAXBException e) {
                 throw new Exception("Unable to load the authorizer configuration file at: " + authorizersConfigurationFile.getAbsolutePath(), e);
             }
         } else {
@@ -517,7 +520,7 @@ public class AuthorizerFactory implements UserGroupProviderLookup, AccessPolicyP
                     "detected and configured during the bootstrap startup sequence. Contact the system administrator.");
         }
         try {
-            final SensitivePropertyProvider sensitivePropertyProvider = sensitivePropertyProviderFactory.getProvider(PropertyProtectionScheme.fromIdentifier(encryptionScheme));
+            final SensitivePropertyProvider sensitivePropertyProvider = sensitivePropertyProviderFactory.getProvider(new StandardProtectionScheme(encryptionScheme));
             return sensitivePropertyProvider.unprotect(cipherText, sensitivePropertyProviderFactory.getPropertyContext(groupIdentifier, propertyName));
         } catch (final IllegalArgumentException e) {
             throw new SensitivePropertyProtectionException(String.format("Authorizer configuration XML was protected using %s, which is not supported. " +

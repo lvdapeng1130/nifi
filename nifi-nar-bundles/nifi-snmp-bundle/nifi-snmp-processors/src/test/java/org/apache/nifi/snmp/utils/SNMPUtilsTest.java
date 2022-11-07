@@ -16,23 +16,23 @@
  */
 package org.apache.nifi.snmp.utils;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.snmp4j.PDU;
 
 import java.util.Map;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Test class for {@link SNMPUtils}.
  */
-public class SNMPUtilsTest {
+class SNMPUtilsTest {
 
     /**
      * Test for updating attributes of flow files with {@link PDU}
      */
     @Test
-    public void validateUpdateFlowFileAttributes() {
+    void validateUpdateFlowFileAttributes() {
         final PDU pdu = new PDU();
         pdu.setErrorIndex(0);
         pdu.setErrorStatus(0);

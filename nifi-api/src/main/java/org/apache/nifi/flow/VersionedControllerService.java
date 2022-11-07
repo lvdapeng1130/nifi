@@ -17,44 +17,17 @@
 
 package org.apache.nifi.flow;
 
-import java.util.List;
-import java.util.Map;
-
 import io.swagger.annotations.ApiModelProperty;
 
-public class VersionedControllerService extends VersionedComponent
-        implements VersionedConfigurableComponent, VersionedExtensionComponent {
+import java.util.List;
 
-    private String type;
-    private Bundle bundle;
+public class VersionedControllerService extends VersionedConfigurableExtension {
+
     private List<ControllerServiceAPI> controllerServiceApis;
 
-    private Map<String, String> properties;
-    private Map<String, VersionedPropertyDescriptor> propertyDescriptors;
     private String annotationData;
-
-
-    @Override
-    @ApiModelProperty(value = "The type of the controller service.")
-    public String getType() {
-        return type;
-    }
-
-    @Override
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    @Override
-    @ApiModelProperty(value = "The details of the artifact that bundled this processor type.")
-    public Bundle getBundle() {
-        return bundle;
-    }
-
-    @Override
-    public void setBundle(Bundle bundle) {
-        this.bundle = bundle;
-    }
+    private ScheduledState scheduledState;
+    private String bulletinLevel;
 
     @ApiModelProperty(value = "Lists the APIs this Controller Service implements.")
     public List<ControllerServiceAPI> getControllerServiceApis() {
@@ -63,28 +36,6 @@ public class VersionedControllerService extends VersionedComponent
 
     public void setControllerServiceApis(List<ControllerServiceAPI> controllerServiceApis) {
         this.controllerServiceApis = controllerServiceApis;
-    }
-
-    @Override
-    @ApiModelProperty(value = "The properties of the controller service.")
-    public Map<String, String> getProperties() {
-        return properties;
-    }
-
-    @Override
-    public void setProperties(Map<String, String> properties) {
-        this.properties = properties;
-    }
-
-    @Override
-    @ApiModelProperty("The property descriptors for the processor.")
-    public Map<String, VersionedPropertyDescriptor> getPropertyDescriptors() {
-        return propertyDescriptors;
-    }
-
-    @Override
-    public void setPropertyDescriptors(Map<String, VersionedPropertyDescriptor> propertyDescriptors) {
-        this.propertyDescriptors = propertyDescriptors;
     }
 
     @ApiModelProperty(value = "The annotation for the controller service. This is how the custom UI relays configuration to the controller service.")
@@ -99,5 +50,23 @@ public class VersionedControllerService extends VersionedComponent
     @Override
     public ComponentType getComponentType() {
         return ComponentType.CONTROLLER_SERVICE;
+    }
+
+    @ApiModelProperty("The ScheduledState denoting whether the Controller Service is ENABLED or DISABLED")
+    public ScheduledState getScheduledState() {
+        return scheduledState;
+    }
+
+    public void setScheduledState(final ScheduledState scheduledState) {
+        this.scheduledState = scheduledState;
+    }
+
+    @ApiModelProperty("The level at which the controller service will report bulletins.")
+    public String getBulletinLevel() {
+        return bulletinLevel;
+    }
+
+    public void setBulletinLevel(String bulletinLevel) {
+        this.bulletinLevel = bulletinLevel;
     }
 }

@@ -46,6 +46,7 @@ import org.apache.nifi.serialization.record.StandardSchemaIdentifier;
 import org.apache.nifi.serialization.record.type.ArrayDataType;
 import org.apache.nifi.serialization.record.type.ChoiceDataType;
 import org.apache.nifi.serialization.record.type.DecimalDataType;
+import org.apache.nifi.serialization.record.type.EnumDataType;
 import org.apache.nifi.serialization.record.type.MapDataType;
 import org.apache.nifi.serialization.record.type.RecordDataType;
 import org.apache.nifi.serialization.record.util.DataTypeUtils;
@@ -88,6 +89,7 @@ public class AvroTypeUtil {
     private static final String LOGICAL_TYPE_TIMESTAMP_MILLIS = "timestamp-millis";
     private static final String LOGICAL_TYPE_TIMESTAMP_MICROS = "timestamp-micros";
     private static final String LOGICAL_TYPE_DECIMAL = "decimal";
+    private static final String LOGICAL_TYPE_UUID = "uuid";
 
 
     public static Schema extractAvroSchema(final RecordSchema recordSchema) {
@@ -124,16 +126,18 @@ public class AvroTypeUtil {
         return avroSchema;
     }
 
-    private static Field buildAvroField(final RecordField recordField, String fieldNamePrefix) {
+    private static Field buildAvroField(final RecordField recordField, final String fieldNamePrefix) {
         final Schema schema = buildAvroSchema(recordField.getDataType(), recordField.getFieldName(), fieldNamePrefix, recordField.isNullable());
 
         final Field field;
         final String recordFieldName = recordField.getFieldName();
         if (isValidAvroFieldName(recordFieldName)) {
-            field = new Field(recordField.getFieldName(), schema, null, recordField.getDefaultValue());
+            final Object avroDefaultValue = convertToAvroObject(recordField.getDefaultValue(), schema);
+            field = new Field(recordField.getFieldName(), schema, null, avroDefaultValue);
         } else {
             final String validName = createValidAvroFieldName(recordField.getFieldName());
-            field = new Field(validName, schema, null, recordField.getDefaultValue());
+            final Object avroDefaultValue = convertToAvroObject(recordField.getDefaultValue(), schema);
+            field = new Field(validName, schema, null, avroDefaultValue);
             field.addAlias(recordField.getFieldName());
         }
 
@@ -296,6 +300,14 @@ public class AvroTypeUtil {
                 schema = Schema.create(Type.LONG);
                 LogicalTypes.timestampMillis().addToSchema(schema);
                 break;
+            case UUID:
+                schema = Schema.create(Type.STRING);
+                LogicalTypes.uuid().addToSchema(schema);
+                break;
+            case ENUM:
+                final EnumDataType enumType = (EnumDataType) dataType;
+                schema = Schema.createEnum(fieldName, "", "org.apache.nifi", enumType.getEnums());
+                break;
             default:
                 return null;
         }
@@ -319,7 +331,7 @@ public class AvroTypeUtil {
             return Schema.createUnion(unionTypes);
         }
 
-        return Schema.createUnion(Schema.create(Type.NULL), schema);
+        return Schema.createUnion(schema, Schema.create(Type.NULL));
     }
 
     /**
@@ -355,6 +367,8 @@ public class AvroTypeUtil {
                 case LOGICAL_TYPE_DECIMAL:
                     final LogicalTypes.Decimal decimal = (LogicalTypes.Decimal) logicalType;
                     return RecordFieldType.DECIMAL.getDecimalDataType(decimal.getPrecision(), decimal.getScale());
+                case LOGICAL_TYPE_UUID:
+                    return RecordFieldType.UUID.getDataType();
             }
         }
 
@@ -622,13 +636,16 @@ public class AvroTypeUtil {
         // see if the Avro schema has any fields that aren't in the RecordSchema, and if those fields have a default
         // value then we want to populate it in the GenericRecord being produced
         for (final Field field : avroSchema.getFields()) {
-            if (field.defaultVal() == null) {
+            final Object defaultValue = field.defaultVal();
+            if (defaultValue == null || defaultValue == JsonProperties.NULL_VALUE) {
                 continue;
             }
 
-            final Optional<RecordField> recordField = recordSchema.getField(field.name());
-            if (!recordField.isPresent() && rec.get(field.name()) == null) {
-                rec.put(field.name(), field.defaultVal());
+            if (rec.get(field.name()) == null) {
+                // The default value may not actually be the proper value for Avro. For example, the schema may indicate that we need a long but provide a default value of 0.
+                // To address this, we need to ensure that the value that we set is correct based on the Avro schema, so we need to call convertToAvroObject even on the default value.
+                final Object normalized = convertToAvroObject(defaultValue, field.schema());
+                rec.put(field.name(), normalized);
             }
         }
 

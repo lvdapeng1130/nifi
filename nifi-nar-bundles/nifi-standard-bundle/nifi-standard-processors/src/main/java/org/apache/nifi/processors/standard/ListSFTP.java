@@ -68,6 +68,7 @@ import java.util.stream.Collectors;
                   "last modified as 'yyyy-MM-dd'T'HH:mm:ssZ'"),
     @WritesAttribute(attribute = "filename", description = "The name of the file on the SFTP Server"),
     @WritesAttribute(attribute = "path", description = "The fully qualified name of the directory on the SFTP Server from which the file was pulled"),
+    @WritesAttribute(attribute = "mime.type", description = "The MIME Type that is provided by the configured Record Writer"),
 })
 @Stateful(scopes = {Scope.CLUSTER}, description = "After performing a listing of files, the timestamp of the newest file is stored. "
     + "This allows the Processor to list only files that have been added or modified after "
@@ -79,13 +80,11 @@ public class ListSFTP extends ListFileTransfer {
 
     @Override
     protected List<PropertyDescriptor> getSupportedPropertyDescriptors() {
-        final PropertyDescriptor port = new PropertyDescriptor.Builder().fromPropertyDescriptor(UNDEFAULTED_PORT).defaultValue("22").build();
-
         final List<PropertyDescriptor> properties = new ArrayList<>();
         properties.add(FILE_TRANSFER_LISTING_STRATEGY);
-        properties.add(HOSTNAME);
-        properties.add(port);
-        properties.add(USERNAME);
+        properties.add(SFTPTransfer.HOSTNAME);
+        properties.add(SFTPTransfer.PORT);
+        properties.add(SFTPTransfer.USERNAME);
         properties.add(SFTPTransfer.PASSWORD);
         properties.add(SFTPTransfer.PRIVATE_KEY_PATH);
         properties.add(SFTPTransfer.PRIVATE_KEY_PASSPHRASE);
@@ -103,6 +102,7 @@ public class ListSFTP extends ListFileTransfer {
         properties.add(SFTPTransfer.DATA_TIMEOUT);
         properties.add(SFTPTransfer.USE_KEEPALIVE_ON_TIMEOUT);
         properties.add(TARGET_SYSTEM_TIMESTAMP_PRECISION);
+        properties.add(SFTPTransfer.USE_COMPRESSION);
         properties.add(SFTPTransfer.PROXY_CONFIGURATION_SERVICE);
         properties.add(FTPTransfer.PROXY_TYPE);
         properties.add(FTPTransfer.PROXY_HOST);

@@ -19,7 +19,9 @@ package org.apache.nifi.stateless;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.nifi.flow.Bundle;
+import org.apache.nifi.flow.VersionedExternalFlow;
 import org.apache.nifi.flow.VersionedPort;
+import org.apache.nifi.registry.VersionedFlowConverter;
 import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
 import org.apache.nifi.stateless.bootstrap.StatelessBootstrap;
 import org.apache.nifi.stateless.config.ExtensionClientDefinition;
@@ -32,11 +34,9 @@ import org.apache.nifi.stateless.engine.StatelessEngineConfiguration;
 import org.apache.nifi.stateless.flow.DataflowDefinition;
 import org.apache.nifi.stateless.flow.StatelessDataflow;
 import org.apache.nifi.stateless.flow.TransactionThresholds;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.rules.TestName;
-import org.junit.rules.Timeout;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -51,6 +51,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+@Timeout(value = 5, unit = TimeUnit.MINUTES)
 public class StatelessSystemIT {
     private final List<StatelessDataflow> createdFlows = new ArrayList<>();
 
@@ -58,19 +59,12 @@ public class StatelessSystemIT {
     // up finding a "compatible bundle" and using that, regardless of the specified version.
     protected static final Bundle SYSTEM_TEST_EXTENSIONS_BUNDLE = new Bundle("org.apache.nifi", "nifi-system-test-extensions-nar", "1.13.0-SNAPSHOT");
 
-    @Rule
-    public TestName name = new TestName();
-
-    @Rule
-    public Timeout defaultTimeout = new Timeout(30, TimeUnit.MINUTES);
-
-
-    @Before
+    @BeforeEach
     public void clearFlows() {
         createdFlows.clear();
     }
 
-    @After
+    @AfterEach
     public void shutdownFlows() {
         createdFlows.forEach(StatelessDataflow::shutdown);
     }
@@ -121,6 +115,11 @@ public class StatelessSystemIT {
             public List<ExtensionClientDefinition> getExtensionClients() {
                 return Collections.emptyList();
             }
+
+            @Override
+            public String getStatusTaskInterval() {
+                return null;
+            }
         };
     }
 
@@ -160,12 +159,21 @@ public class StatelessSystemIT {
 
     protected StatelessDataflow loadDataflow(final VersionedFlowSnapshot versionedFlowSnapshot, final List<ParameterContextDefinition> parameterContexts,
                                              final List<ParameterValueProviderDefinition> parameterValueProviderDefinitions, final Set<String> failurePortNames,
+                                             final TransactionThresholds transactionThresholds)
+                throws IOException, StatelessConfigurationException {
+
+        final VersionedExternalFlow externalFlow = VersionedFlowConverter.createVersionedExternalFlow(versionedFlowSnapshot);
+        return loadDataflow(externalFlow, parameterContexts, parameterValueProviderDefinitions, failurePortNames, transactionThresholds);
+    }
+
+    protected StatelessDataflow loadDataflow(final VersionedExternalFlow versionedExternalFlow, final List<ParameterContextDefinition> parameterContexts,
+                                             final List<ParameterValueProviderDefinition> parameterValueProviderDefinitions, final Set<String> failurePortNames,
                                              final TransactionThresholds transactionThresholds) throws IOException, StatelessConfigurationException {
 
-        final DataflowDefinition<VersionedFlowSnapshot> dataflowDefinition = new DataflowDefinition<VersionedFlowSnapshot>() {
+        final DataflowDefinition dataflowDefinition = new DataflowDefinition() {
             @Override
-            public VersionedFlowSnapshot getFlowSnapshot() {
-                return versionedFlowSnapshot;
+            public VersionedExternalFlow getVersionedExternalFlow() {
+                return versionedExternalFlow;
             }
 
             @Override
@@ -180,14 +188,14 @@ public class StatelessSystemIT {
 
             @Override
             public Set<String> getInputPortNames() {
-                return versionedFlowSnapshot.getFlowContents().getInputPorts().stream()
+                return versionedExternalFlow.getFlowContents().getInputPorts().stream()
                     .map(VersionedPort::getName)
                     .collect(Collectors.toSet());
             }
 
             @Override
             public Set<String> getOutputPortNames() {
-                return versionedFlowSnapshot.getFlowContents().getOutputPorts().stream()
+                return versionedExternalFlow.getFlowContents().getOutputPorts().stream()
                     .map(VersionedPort::getName)
                     .collect(Collectors.toSet());
             }
@@ -219,9 +227,5 @@ public class StatelessSystemIT {
 
         createdFlows.add(dataflow);
         return dataflow;
-    }
-
-    protected String getTestName() {
-        return name.getMethodName();
     }
 }

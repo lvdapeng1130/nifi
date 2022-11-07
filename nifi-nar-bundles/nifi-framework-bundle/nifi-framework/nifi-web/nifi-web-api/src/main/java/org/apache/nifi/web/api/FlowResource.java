@@ -70,8 +70,8 @@ import org.apache.nifi.web.api.entity.AboutEntity;
 import org.apache.nifi.web.api.entity.ActionEntity;
 import org.apache.nifi.web.api.entity.ActivateControllerServicesEntity;
 import org.apache.nifi.web.api.entity.BannerEntity;
-import org.apache.nifi.web.api.entity.BucketEntity;
-import org.apache.nifi.web.api.entity.BucketsEntity;
+import org.apache.nifi.web.api.entity.FlowRegistryBucketEntity;
+import org.apache.nifi.web.api.entity.FlowRegistryBucketsEntity;
 import org.apache.nifi.web.api.entity.BulletinBoardEntity;
 import org.apache.nifi.web.api.entity.ClusteSummaryEntity;
 import org.apache.nifi.web.api.entity.ClusterSearchResultsEntity;
@@ -85,9 +85,14 @@ import org.apache.nifi.web.api.entity.ControllerServicesEntity;
 import org.apache.nifi.web.api.entity.ControllerStatusEntity;
 import org.apache.nifi.web.api.entity.CurrentUserEntity;
 import org.apache.nifi.web.api.entity.FlowConfigurationEntity;
+import org.apache.nifi.web.api.entity.FlowRegistryClientEntity;
+import org.apache.nifi.web.api.entity.FlowRegistryClientsEntity;
 import org.apache.nifi.web.api.entity.HistoryEntity;
 import org.apache.nifi.web.api.entity.ParameterContextEntity;
 import org.apache.nifi.web.api.entity.ParameterContextsEntity;
+import org.apache.nifi.web.api.entity.ParameterProviderEntity;
+import org.apache.nifi.web.api.entity.ParameterProviderTypesEntity;
+import org.apache.nifi.web.api.entity.ParameterProvidersEntity;
 import org.apache.nifi.web.api.entity.PortStatusEntity;
 import org.apache.nifi.web.api.entity.PrioritizerTypesEntity;
 import org.apache.nifi.web.api.entity.ProcessGroupEntity;
@@ -95,13 +100,11 @@ import org.apache.nifi.web.api.entity.ProcessGroupFlowEntity;
 import org.apache.nifi.web.api.entity.ProcessGroupStatusEntity;
 import org.apache.nifi.web.api.entity.ProcessorStatusEntity;
 import org.apache.nifi.web.api.entity.ProcessorTypesEntity;
-import org.apache.nifi.web.api.entity.RegistriesEntity;
-import org.apache.nifi.web.api.entity.RegistryClientsEntity;
-import org.apache.nifi.web.api.entity.RegistryEntity;
 import org.apache.nifi.web.api.entity.RemoteProcessGroupStatusEntity;
 import org.apache.nifi.web.api.entity.ReportingTaskEntity;
 import org.apache.nifi.web.api.entity.ReportingTaskTypesEntity;
 import org.apache.nifi.web.api.entity.ReportingTasksEntity;
+import org.apache.nifi.web.api.entity.RuntimeManifestEntity;
 import org.apache.nifi.web.api.entity.ScheduleComponentsEntity;
 import org.apache.nifi.web.api.entity.SearchResultsEntity;
 import org.apache.nifi.web.api.entity.StatusHistoryEntity;
@@ -111,8 +114,13 @@ import org.apache.nifi.web.api.entity.VersionedFlowEntity;
 import org.apache.nifi.web.api.entity.VersionedFlowSnapshotMetadataEntity;
 import org.apache.nifi.web.api.entity.VersionedFlowSnapshotMetadataSetEntity;
 import org.apache.nifi.web.api.entity.VersionedFlowsEntity;
+import org.apache.nifi.web.api.metrics.JsonFormatPrometheusMetricsWriter;
+import org.apache.nifi.web.api.metrics.PrometheusMetricsWriter;
+import org.apache.nifi.web.api.metrics.TextFormatPrometheusMetricsWriter;
 import org.apache.nifi.web.api.request.BulletinBoardPatternParameter;
 import org.apache.nifi.web.api.request.DateTimeParameter;
+import org.apache.nifi.web.api.request.FlowMetricsProducer;
+import org.apache.nifi.web.api.request.FlowMetricsRegistry;
 import org.apache.nifi.web.api.request.IntegerParameter;
 import org.apache.nifi.web.api.request.LongParameter;
 
@@ -131,13 +139,10 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.StreamingOutput;
-import java.io.BufferedWriter;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -165,6 +170,7 @@ import static org.apache.nifi.web.api.entity.ScheduleComponentsEntity.STATE_ENAB
 )
 public class FlowResource extends ApplicationResource {
 
+    private static final String NIFI_REGISTRY_TYPE = "org.apache.nifi.registry.flow.NifiRegistryFlowRegistryClient";
     private static final String RECURSIVE = "false";
 
     private NiFiServiceFacade serviceFacade;
@@ -181,6 +187,7 @@ public class FlowResource extends ApplicationResource {
     private ProcessGroupResource processGroupResource;
     private ControllerServiceResource controllerServiceResource;
     private ReportingTaskResource reportingTaskResource;
+    private ParameterProviderResource parameterProviderResource;
 
     public FlowResource() {
         super();
@@ -190,9 +197,8 @@ public class FlowResource extends ApplicationResource {
      * Populates the remaining fields in the specified process group.
      *
      * @param flow group
-     * @return group dto
      */
-    private ProcessGroupFlowDTO populateRemainingFlowContent(ProcessGroupFlowDTO flow) {
+    private void populateRemainingFlowContent(ProcessGroupFlowDTO flow) {
         FlowDTO flowStructure = flow.getFlow();
 
         // populate the remaining fields for the processors, connections, process group refs, remote process groups, and labels if appropriate
@@ -202,14 +208,12 @@ public class FlowResource extends ApplicationResource {
 
         // set the process group uri
         flow.setUri(generateResourceUri("flow", "process-groups", flow.getId()));
-
-        return flow;
     }
 
     /**
      * Populates the remaining content of the specified snippet.
      */
-    private FlowDTO populateRemainingFlowStructure(FlowDTO flowStructure) {
+    private void populateRemainingFlowStructure(FlowDTO flowStructure) {
         processorResource.populateRemainingProcessorEntitiesContent(flowStructure.getProcessors());
         connectionResource.populateRemainingConnectionEntitiesContent(flowStructure.getConnections());
         inputPortResource.populateRemainingInputPortEntitiesContent(flowStructure.getInputPorts());
@@ -226,8 +230,6 @@ public class FlowResource extends ApplicationResource {
                 processGroup.setContents(null);
             }
         }
-
-        return flowStructure;
     }
 
     /**
@@ -371,8 +373,7 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getFlow(
             @ApiParam(
-                    value = "The process group id.",
-                    required = false
+                    value = "The process group id."
             )
             @PathParam("id") final String groupId,
             @QueryParam("uiOnly") @DefaultValue("false") final boolean uiOnly) {
@@ -393,7 +394,6 @@ public class FlowResource extends ApplicationResource {
      * Retrieves the metrics of the entire flow.
      *
      * @return A flowMetricsEntity.
-     * @throws InterruptedException if interrupted
      */
     @GET
     @Consumes(MediaType.WILDCARD)
@@ -418,30 +418,50 @@ public class FlowResource extends ApplicationResource {
     public Response getFlowMetrics(
             @ApiParam(
                     value = "The producer for flow file metrics. Each producer may have its own output format.",
-                    required = true
+                    required = true,
+                    allowableValues = "prometheus"
             )
-            @PathParam("producer") final String producer) throws InterruptedException {
+            @PathParam("producer") final String producer,
+            @ApiParam(
+                    value = "Set of included metrics registries",
+                    allowableValues = "NIFI,JVM,BULLETIN,CONNECTION"
+            )
+            @QueryParam("includedRegistries") final Set<FlowMetricsRegistry> includedRegistries,
+            @ApiParam(
+                    value = "Regular Expression Pattern to be applied against the sample name field"
+            )
+            @QueryParam("sampleName") final String sampleName,
+            @ApiParam(
+                    value = "Regular Expression Pattern to be applied against the sample label value field"
+            )
+            @QueryParam("sampleLabelValue") final String sampleLabelValue,
+            @ApiParam(
+                    value = "Name of the first field of JSON object. Applicable for JSON producer only."
+            )
+            @QueryParam("rootFieldName") final String rootFieldName
+    ) {
 
         authorizeFlow();
 
-        if ("prometheus".equalsIgnoreCase(producer)) {
-            // get this process group flow
-            final Collection<CollectorRegistry> allRegistries = serviceFacade.generateFlowMetrics();
-            // generate a streaming response
-            final StreamingOutput response = output -> {
-                Writer writer = new BufferedWriter(new OutputStreamWriter(output));
-                for (CollectorRegistry collectorRegistry : allRegistries) {
-                    TextFormat.write004(writer, collectorRegistry.metricFamilySamples());
-                    // flush the response
-                    output.flush();
-                }
-                writer.flush();
-                writer.close();
-            };
+        final Set<FlowMetricsRegistry> selectedRegistries = includedRegistries == null ? Collections.emptySet() : includedRegistries;
+        final Collection<CollectorRegistry> registries = serviceFacade.generateFlowMetrics(selectedRegistries);
 
-            return generateOkResponse(response)
-                    .type(MediaType.TEXT_PLAIN_TYPE)
+        if (FlowMetricsProducer.PROMETHEUS.getProducer().equalsIgnoreCase(producer)) {
+            final StreamingOutput response = (outputStream -> {
+                final PrometheusMetricsWriter prometheusMetricsWriter = new TextFormatPrometheusMetricsWriter(sampleName, sampleLabelValue);
+                prometheusMetricsWriter.write(registries, outputStream);
+            });
+            return generateOkResponse(response).type(TextFormat.CONTENT_TYPE_004).build();
+
+        } else if (FlowMetricsProducer.JSON.getProducer().equals(producer)) {
+            final StreamingOutput output = outputStream -> {
+                final JsonFormatPrometheusMetricsWriter jsonPrometheusMetricsWriter = new JsonFormatPrometheusMetricsWriter(sampleName, sampleLabelValue, rootFieldName);
+                jsonPrometheusMetricsWriter.write(registries, outputStream);
+            };
+            return generateOkResponse(output)
+                    .type(MediaType.APPLICATION_JSON_TYPE)
                     .build();
+
         } else {
             throw new ResourceNotFoundException("The specified producer is missing or invalid.");
         }
@@ -465,7 +485,9 @@ public class FlowResource extends ApplicationResource {
             response = ControllerServicesEntity.class,
             authorizations = {
                     @Authorization(value = "Read - /flow")
-            }
+            },
+            notes = "If the uiOnly query parameter is provided with a value of true, the returned entity may only contain fields that are necessary for rendering the NiFi User Interface. As such, " +
+                "the selected fields may change at any time, even during incremental releases, without warning. As a result, this parameter should not be provided by any client other than the UI."
     )
     @ApiResponses(
             value = {
@@ -475,7 +497,7 @@ public class FlowResource extends ApplicationResource {
                     @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
             }
     )
-    public Response getControllerServicesFromController() {
+    public Response getControllerServicesFromController(@QueryParam("uiOnly") @DefaultValue("false") final boolean uiOnly) {
 
         authorizeFlow();
 
@@ -485,6 +507,10 @@ public class FlowResource extends ApplicationResource {
 
         // get all the controller services
         final Set<ControllerServiceEntity> controllerServices = serviceFacade.getControllerServices(null, false, false);
+        if (uiOnly) {
+            controllerServices.forEach(this::stripNonUiRelevantFields);
+        }
+
         controllerServiceResource.populateRemainingControllerServiceEntitiesContent(controllerServices);
 
         // create the response entity
@@ -500,7 +526,6 @@ public class FlowResource extends ApplicationResource {
      * Retrieves all the of controller services in this NiFi.
      *
      * @return A controllerServicesEntity.
-     * @throws InterruptedException if interrupted
      */
     @GET
     @Consumes(MediaType.WILDCARD)
@@ -511,7 +536,9 @@ public class FlowResource extends ApplicationResource {
             response = ControllerServicesEntity.class,
             authorizations = {
                     @Authorization(value = "Read - /flow")
-            }
+            },
+            notes = "If the uiOnly query parameter is provided with a value of true, the returned entity may only contain fields that are necessary for rendering the NiFi User Interface. As such, " +
+                "the selected fields may change at any time, even during incremental releases, without warning. As a result, this parameter should not be provided by any client other than the UI."
     )
     @ApiResponses(
             value = {
@@ -524,8 +551,8 @@ public class FlowResource extends ApplicationResource {
     public Response getControllerServicesFromGroup(
             @ApiParam(value = "The process group id.", required = true) @PathParam("id") String groupId,
             @ApiParam("Whether or not to include parent/ancestory process groups") @QueryParam("includeAncestorGroups") @DefaultValue("true") boolean includeAncestorGroups,
-            @ApiParam("Whether or not to include descendant process groups") @QueryParam("includeDescendantGroups") @DefaultValue("false") boolean includeDescendantGroups
-            ) throws InterruptedException {
+            @ApiParam("Whether or not to include descendant process groups") @QueryParam("includeDescendantGroups") @DefaultValue("false") boolean includeDescendantGroups,
+            @QueryParam("uiOnly") @DefaultValue("false") final boolean uiOnly) {
 
         authorizeFlow();
 
@@ -535,12 +562,64 @@ public class FlowResource extends ApplicationResource {
 
         // get all the controller services
         final Set<ControllerServiceEntity> controllerServices = serviceFacade.getControllerServices(groupId, includeAncestorGroups, includeDescendantGroups);
+        if (uiOnly) {
+            controllerServices.forEach(this::stripNonUiRelevantFields);
+        }
         controllerServiceResource.populateRemainingControllerServiceEntitiesContent(controllerServices);
 
         // create the response entity
         final ControllerServicesEntity entity = new ControllerServicesEntity();
         entity.setCurrentTime(new Date());
         entity.setControllerServices(controllerServices);
+
+        // generate the response
+        return generateOkResponse(entity).build();
+    }
+
+
+    // ---------------
+    // parameter-providers
+    // ---------------
+
+    /**
+     * Retrieves all the of parameter providers in this NiFi.
+     *
+     * @return A parameterProvidersEntity.
+     */
+    @GET
+    @Consumes(MediaType.WILDCARD)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("parameter-providers")
+    @ApiOperation(
+            value = "Gets all parameter providers",
+            response = ParameterProvidersEntity.class,
+            authorizations = {
+                    @Authorization(value = "Read - /flow")
+            }
+    )
+    @ApiResponses(
+            value = {
+                    @ApiResponse(code = 400, message = "NiFi was unable to complete the request because it was invalid. The request should not be retried without modification."),
+                    @ApiResponse(code = 401, message = "Client could not be authenticated."),
+                    @ApiResponse(code = 403, message = "Client is not authorized to make this request."),
+                    @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
+            }
+    )
+    public Response getParameterProviders() {
+
+        authorizeFlow();
+
+        if (isReplicateRequest()) {
+            return replicate(HttpMethod.GET);
+        }
+
+        // get all the parameter providers
+        final Set<ParameterProviderEntity> parameterProviders = serviceFacade.getParameterProviders();
+        parameterProviderResource.populateRemainingParameterProviderEntitiesContent(parameterProviders);
+
+        // create the response entity
+        final ParameterProvidersEntity entity = new ParameterProvidersEntity();
+        entity.setParameterProviders(parameterProviders);
 
         // generate the response
         return generateOkResponse(entity).build();
@@ -705,25 +784,19 @@ public class FlowResource extends ApplicationResource {
                 group.findAllProcessors().stream()
                         .filter(getProcessorFilter.get())
                         .filter(processor -> OperationAuthorizable.isOperationAuthorized(processor, authorizer, NiFiUserUtils.getNiFiUser()))
-                        .forEach(processor -> {
-                            componentIds.add(processor.getIdentifier());
-                        });
+                        .forEach(processor -> componentIds.add(processor.getIdentifier()));
 
                 // ensure authorized for each input port we will attempt to schedule
                 group.findAllInputPorts().stream()
                     .filter(getPortFilter.get())
                         .filter(inputPort -> OperationAuthorizable.isOperationAuthorized(inputPort, authorizer, NiFiUserUtils.getNiFiUser()))
-                        .forEach(inputPort -> {
-                            componentIds.add(inputPort.getIdentifier());
-                        });
+                        .forEach(inputPort -> componentIds.add(inputPort.getIdentifier()));
 
                 // ensure authorized for each output port we will attempt to schedule
                 group.findAllOutputPorts().stream()
                         .filter(getPortFilter.get())
                         .filter(outputPort -> OperationAuthorizable.isOperationAuthorized(outputPort, authorizer, NiFiUserUtils.getNiFiUser()))
-                        .forEach(outputPort -> {
-                            componentIds.add(outputPort.getIdentifier());
-                        });
+                        .forEach(outputPort -> componentIds.add(outputPort.getIdentifier()));
 
                 return componentIds;
             });
@@ -936,7 +1009,6 @@ public class FlowResource extends ApplicationResource {
      *
      * @param value Search string
      * @return A searchResultsEntity
-     * @throws InterruptedException if interrupted
      */
     @GET
     @Consumes(MediaType.WILDCARD)
@@ -961,7 +1033,7 @@ public class FlowResource extends ApplicationResource {
     public Response searchFlow(
             @QueryParam("q") @DefaultValue(StringUtils.EMPTY) String value,
             @QueryParam("a") @DefaultValue(StringUtils.EMPTY) String activeGroupId
-    ) throws InterruptedException {
+    ) {
         authorizeFlow();
 
         // query the controller
@@ -1022,7 +1094,6 @@ public class FlowResource extends ApplicationResource {
      * Retrieves the cluster summary for this NiFi.
      *
      * @return A clusterSummaryEntity.
-     * @throws InterruptedException if interrupted
      */
     @GET
     @Consumes(MediaType.WILDCARD)
@@ -1043,7 +1114,7 @@ public class FlowResource extends ApplicationResource {
                     @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
             }
     )
-    public Response getClusterSummary() throws InterruptedException {
+    public Response getClusterSummary() {
 
         authorizeFlow();
 
@@ -1187,18 +1258,15 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getProcessorTypes(
             @ApiParam(
-                value = "If specified, will only return types that are a member of this bundle group.",
-                required = false
+                value = "If specified, will only return types that are a member of this bundle group."
             )
             @QueryParam("bundleGroupFilter") String bundleGroupFilter,
             @ApiParam(
-                    value = "If specified, will only return types that are a member of this bundle artifact.",
-                    required = false
+                    value = "If specified, will only return types that are a member of this bundle artifact."
             )
             @QueryParam("bundleArtifactFilter") String bundleArtifactFilter,
             @ApiParam(
-                    value = "If specified, will only return types whose fully qualified classname matches.",
-                    required = false
+                    value = "If specified, will only return types whose fully qualified classname matches."
             )
             @QueryParam("type") String typeFilter) throws InterruptedException {
 
@@ -1245,38 +1313,31 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getControllerServiceTypes(
             @ApiParam(
-                    value = "If specified, will only return controller services that are compatible with this type of service.",
-                    required = false
+                    value = "If specified, will only return controller services that are compatible with this type of service."
             )
             @QueryParam("serviceType") String serviceType,
             @ApiParam(
-                    value = "If serviceType specified, is the bundle group of the serviceType.",
-                    required = false
+                    value = "If serviceType specified, is the bundle group of the serviceType."
             )
             @QueryParam("serviceBundleGroup") String serviceBundleGroup,
             @ApiParam(
-                    value = "If serviceType specified, is the bundle artifact of the serviceType.",
-                    required = false
+                    value = "If serviceType specified, is the bundle artifact of the serviceType."
             )
             @QueryParam("serviceBundleArtifact") String serviceBundleArtifact,
             @ApiParam(
-                    value = "If serviceType specified, is the bundle version of the serviceType.",
-                    required = false
+                    value = "If serviceType specified, is the bundle version of the serviceType."
             )
             @QueryParam("serviceBundleVersion") String serviceBundleVersion,
             @ApiParam(
-                    value = "If specified, will only return types that are a member of this bundle group.",
-                    required = false
+                    value = "If specified, will only return types that are a member of this bundle group."
             )
             @QueryParam("bundleGroupFilter") String bundleGroupFilter,
             @ApiParam(
-                    value = "If specified, will only return types that are a member of this bundle artifact.",
-                    required = false
+                    value = "If specified, will only return types that are a member of this bundle artifact."
             )
             @QueryParam("bundleArtifactFilter") String bundleArtifactFilter,
             @ApiParam(
-                    value = "If specified, will only return types whose fully qualified classname matches.",
-                    required = false
+                    value = "If specified, will only return types whose fully qualified classname matches."
             )
             @QueryParam("typeFilter") String typeFilter) throws InterruptedException {
 
@@ -1304,7 +1365,7 @@ public class FlowResource extends ApplicationResource {
     /**
      * Retrieves the types of reporting tasks that this NiFi supports.
      *
-     * @return A controllerServicesTypesEntity.
+     * @return A ReportingTaskTypesEntity.
      * @throws InterruptedException if interrupted
      */
     @GET
@@ -1329,6 +1390,96 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getReportingTaskTypes(
             @ApiParam(
+                    value = "If specified, will only return types that are a member of this bundle group."
+            )
+            @QueryParam("bundleGroupFilter") String bundleGroupFilter,
+            @ApiParam(
+                    value = "If specified, will only return types that are a member of this bundle artifact."
+            )
+            @QueryParam("bundleArtifactFilter") String bundleArtifactFilter,
+            @ApiParam(
+                    value = "If specified, will only return types whose fully qualified classname matches."
+            )
+            @QueryParam("type") String typeFilter) throws InterruptedException {
+
+        authorizeFlow();
+
+        if (isReplicateRequest()) {
+            return replicate(HttpMethod.GET);
+        }
+
+        // create response entity
+        final ReportingTaskTypesEntity entity = new ReportingTaskTypesEntity();
+        entity.setReportingTaskTypes(serviceFacade.getReportingTaskTypes(bundleGroupFilter, bundleArtifactFilter, typeFilter));
+
+        // generate the response
+        return generateOkResponse(entity).build();
+    }
+
+    @GET
+    @Consumes(MediaType.WILDCARD)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("runtime-manifest")
+    @ApiOperation(
+            value = "Retrieves the runtime manifest for this NiFi instance.",
+            notes = NON_GUARANTEED_ENDPOINT,
+            response = RuntimeManifestEntity.class,
+            authorizations = {
+                    @Authorization(value = "Read - /flow")
+            }
+    )
+    @ApiResponses(
+            value = {
+                    @ApiResponse(code = 400, message = "NiFi was unable to complete the request because it was invalid. The request should not be retried without modification."),
+                    @ApiResponse(code = 401, message = "Client could not be authenticated."),
+                    @ApiResponse(code = 403, message = "Client is not authorized to make this request."),
+                    @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
+            }
+    )
+    public Response getRuntimeManifest() throws InterruptedException {
+
+        authorizeFlow();
+
+        if (isReplicateRequest()) {
+            return replicate(HttpMethod.GET);
+        }
+
+        // create response entity
+        final RuntimeManifestEntity entity = new RuntimeManifestEntity();
+        entity.setRuntimeManifest(serviceFacade.getRuntimeManifest());
+
+        // generate the response
+        return generateOkResponse(entity).build();
+    }
+
+    /**
+     * Retrieves the types of parameter providers that this NiFi supports.
+     *
+     * @return A ParameterProviderTypesEntity.
+     * @throws InterruptedException if interrupted
+     */
+    @GET
+    @Consumes(MediaType.WILDCARD)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("parameter-provider-types")
+    @ApiOperation(
+            value = "Retrieves the types of parameter providers that this NiFi supports",
+            notes = NON_GUARANTEED_ENDPOINT,
+            response = ParameterProviderTypesEntity.class,
+            authorizations = {
+                    @Authorization(value = "Read - /flow")
+            }
+    )
+    @ApiResponses(
+            value = {
+                    @ApiResponse(code = 400, message = "NiFi was unable to complete the request because it was invalid. The request should not be retried without modification."),
+                    @ApiResponse(code = 401, message = "Client could not be authenticated."),
+                    @ApiResponse(code = 403, message = "Client is not authorized to make this request."),
+                    @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
+            }
+    )
+    public Response getParameterProviderTypes(
+            @ApiParam(
                     value = "If specified, will only return types that are a member of this bundle group.",
                     required = false
             )
@@ -1351,8 +1502,8 @@ public class FlowResource extends ApplicationResource {
         }
 
         // create response entity
-        final ReportingTaskTypesEntity entity = new ReportingTaskTypesEntity();
-        entity.setReportingTaskTypes(serviceFacade.getReportingTaskTypes(bundleGroupFilter, bundleArtifactFilter, typeFilter));
+        final ParameterProviderTypesEntity entity = new ParameterProviderTypesEntity();
+        entity.setParameterProviderTypes(serviceFacade.getParameterProviderTypes(bundleGroupFilter, bundleArtifactFilter, typeFilter));
 
         // generate the response
         return generateOkResponse(entity).build();
@@ -1466,7 +1617,7 @@ public class FlowResource extends ApplicationResource {
     @Consumes(MediaType.WILDCARD)
     @Produces(MediaType.APPLICATION_JSON)
     @Path("registries")
-    @ApiOperation(value = "Gets the listing of available registries", response = RegistryClientsEntity.class, authorizations = {
+    @ApiOperation(value = "Gets the listing of available flow registry clients", response = FlowRegistryClientsEntity.class, authorizations = {
             @Authorization(value = "Read - /flow")
     })
     @ApiResponses(value = {
@@ -1476,22 +1627,49 @@ public class FlowResource extends ApplicationResource {
             @ApiResponse(code = 404, message = "The specified resource could not be found."),
             @ApiResponse(code = 409, message = "The request was valid but NiFi was not in the appropriate state to process it. Retrying the same request later may be successful.")
     })
-    public Response getRegistries() {
+    public Response getRegistryClients() {
         authorizeFlow();
 
-        final Set<RegistryEntity> registries = serviceFacade.getRegistriesForUser(NiFiUserUtils.getNiFiUser());
+        final Set<FlowRegistryClientEntity> registryClients = serviceFacade.getRegistryClientsForUser();
+        final FlowRegistryClientsEntity registryClientEntities = new FlowRegistryClientsEntity();
+        registryClientEntities.setRegistries(registryClients);
 
-        final RegistriesEntity registryEntities = new RegistriesEntity();
-        registryEntities.setRegistries(registries);
-
-        return generateOkResponse(registryEntities).build();
+        return generateOkResponse(populateRemainingRegistryClientEntityContent(registryClientEntities)).build();
     }
+
+    /**
+     * Populate the uri's for the specified flow registry client and also extend the result to make it backward compatible.
+     *
+     * @param flowRegistryClientEntity flow registry client
+     * @return the updated entity
+     */
+    private FlowRegistryClientEntity populateRemainingRegistryClientEntityContent(final FlowRegistryClientEntity flowRegistryClientEntity) {
+        flowRegistryClientEntity.setUri(generateResourceUri("controller", "registry-clients", flowRegistryClientEntity.getId()));
+
+        if (flowRegistryClientEntity.getComponent().getType().equals(NIFI_REGISTRY_TYPE)) {
+            flowRegistryClientEntity.getComponent().setUri(flowRegistryClientEntity.getComponent().getProperties().get("url"));
+        }
+
+        return flowRegistryClientEntity;
+    }
+
+    /**
+     * Populate the uri's for all contained flow registry clients and also extend the result to make it backward compatible.
+     */
+    private FlowRegistryClientsEntity populateRemainingRegistryClientEntityContent(final FlowRegistryClientsEntity flowRegistryClientsEntity) {
+        for (final FlowRegistryClientEntity entity : flowRegistryClientsEntity.getRegistries()) {
+            populateRemainingRegistryClientEntityContent(entity);
+        }
+
+        return flowRegistryClientsEntity;
+    }
+
 
     @GET
     @Consumes(MediaType.WILDCARD)
     @Produces(MediaType.APPLICATION_JSON)
     @Path("registries/{id}/buckets")
-    @ApiOperation(value = "Gets the buckets from the specified registry for the current user", response = BucketsEntity.class, authorizations = {
+    @ApiOperation(value = "Gets the buckets from the specified registry for the current user", response = FlowRegistryBucketsEntity.class, authorizations = {
             @Authorization(value = "Read - /flow")
     })
     @ApiResponses(value = {
@@ -1510,28 +1688,23 @@ public class FlowResource extends ApplicationResource {
 
         authorizeFlow();
 
-        final Set<BucketEntity> buckets = serviceFacade.getBucketsForUser(id, NiFiUserUtils.getNiFiUser());
-        final SortedSet<BucketEntity> sortedBuckets = sortBuckets(buckets);
+        final Set<FlowRegistryBucketEntity> buckets = serviceFacade.getBucketsForUser(id);
+        final SortedSet<FlowRegistryBucketEntity> sortedBuckets = sortBuckets(buckets);
 
-        final BucketsEntity bucketsEntity = new BucketsEntity();
-        bucketsEntity.setBuckets(sortedBuckets);
+        final FlowRegistryBucketsEntity flowRegistryBucketsEntity = new FlowRegistryBucketsEntity();
+        flowRegistryBucketsEntity.setBuckets(sortedBuckets);
 
-        return generateOkResponse(bucketsEntity).build();
+        return generateOkResponse(flowRegistryBucketsEntity).build();
     }
 
-    private SortedSet<BucketEntity> sortBuckets(final Set<BucketEntity> buckets) {
-        final SortedSet<BucketEntity> sortedBuckets = new TreeSet<>(new Comparator<BucketEntity>() {
-            @Override
-            public int compare(final BucketEntity entity1, final BucketEntity entity2) {
-                return Collator.getInstance().compare(getBucketName(entity1), getBucketName(entity2));
-            }
-        });
+    private SortedSet<FlowRegistryBucketEntity> sortBuckets(final Set<FlowRegistryBucketEntity> buckets) {
+        final SortedSet<FlowRegistryBucketEntity> sortedBuckets = new TreeSet<>((entity1, entity2) -> Collator.getInstance().compare(getBucketName(entity1), getBucketName(entity2)));
 
         sortedBuckets.addAll(buckets);
         return sortedBuckets;
     }
 
-    private String getBucketName(final BucketEntity entity) {
+    private String getBucketName(final FlowRegistryBucketEntity entity) {
         return entity.getBucket() == null ? null : entity.getBucket().getName();
     }
 
@@ -1551,7 +1724,7 @@ public class FlowResource extends ApplicationResource {
     })
     public Response getFlows(
             @ApiParam(
-                value = "The registry id.",
+                value = "The registry client id.",
                 required = true
             )
             @PathParam("registry-id") String registryId,
@@ -1563,8 +1736,8 @@ public class FlowResource extends ApplicationResource {
 
         authorizeFlow();
 
-        final Set<VersionedFlowEntity> versionedFlows = serviceFacade.getFlowsForUser(registryId, bucketId, NiFiUserUtils.getNiFiUser());
-        final SortedSet<VersionedFlowEntity> sortedFlows = sortFlows(versionedFlows);
+        final Set<VersionedFlowEntity> registeredFlows = serviceFacade.getFlowsForUser(registryId, bucketId);
+        final SortedSet<VersionedFlowEntity> sortedFlows = sortFlows(registeredFlows);
 
         final VersionedFlowsEntity versionedFlowsEntity = new VersionedFlowsEntity();
         versionedFlowsEntity.setVersionedFlows(sortedFlows);
@@ -1573,12 +1746,7 @@ public class FlowResource extends ApplicationResource {
     }
 
     private SortedSet<VersionedFlowEntity> sortFlows(final Set<VersionedFlowEntity> versionedFlows) {
-        final SortedSet<VersionedFlowEntity> sortedFlows = new TreeSet<>(new Comparator<VersionedFlowEntity>() {
-            @Override
-            public int compare(final VersionedFlowEntity entity1, final VersionedFlowEntity entity2) {
-                return Collator.getInstance().compare(getFlowName(entity1), getFlowName(entity2));
-            }
-        });
+        final SortedSet<VersionedFlowEntity> sortedFlows = new TreeSet<>((entity1, entity2) -> Collator.getInstance().compare(getFlowName(entity1), getFlowName(entity2)));
 
         sortedFlows.addAll(versionedFlows);
         return sortedFlows;
@@ -1606,7 +1774,7 @@ public class FlowResource extends ApplicationResource {
     })
     public Response getVersions(
             @ApiParam(
-                    value = "The registry id.",
+                    value = "The registry client id.",
                     required = true
             )
             @PathParam("registry-id") String registryId,
@@ -1623,10 +1791,10 @@ public class FlowResource extends ApplicationResource {
 
         authorizeFlow();
 
-        final Set<VersionedFlowSnapshotMetadataEntity> versionedFlowSnapshotMetadataSet = serviceFacade.getFlowVersionsForUser(registryId, bucketId, flowId, NiFiUserUtils.getNiFiUser());
+        final Set<VersionedFlowSnapshotMetadataEntity> registeredFlowSnapshotMetadataSet = serviceFacade.getFlowVersionsForUser(registryId, bucketId, flowId);
 
         final VersionedFlowSnapshotMetadataSetEntity versionedFlowSnapshotMetadataSetEntity = new VersionedFlowSnapshotMetadataSetEntity();
-        versionedFlowSnapshotMetadataSetEntity.setVersionedFlowSnapshotMetadataSet(versionedFlowSnapshotMetadataSet);
+        versionedFlowSnapshotMetadataSetEntity.setVersionedFlowSnapshotMetadataSet(registeredFlowSnapshotMetadataSet);
 
         return generateOkResponse(versionedFlowSnapshotMetadataSetEntity).build();
     }
@@ -1670,33 +1838,27 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getBulletinBoard(
             @ApiParam(
-                    value = "Includes bulletins with an id after this value.",
-                    required = false
+                    value = "Includes bulletins with an id after this value."
             )
             @QueryParam("after") LongParameter after,
             @ApiParam(
-                    value = "Includes bulletins originating from this sources whose name match this regular expression.",
-                    required = false
+                    value = "Includes bulletins originating from this sources whose name match this regular expression."
             )
             @QueryParam("sourceName") BulletinBoardPatternParameter sourceName,
             @ApiParam(
-                    value = "Includes bulletins whose message that match this regular expression.",
-                    required = false
+                    value = "Includes bulletins whose message that match this regular expression."
             )
             @QueryParam("message") BulletinBoardPatternParameter message,
             @ApiParam(
-                    value = "Includes bulletins originating from this sources whose id match this regular expression.",
-                    required = false
+                    value = "Includes bulletins originating from this sources whose id match this regular expression."
             )
             @QueryParam("sourceId") BulletinBoardPatternParameter sourceId,
             @ApiParam(
-                    value = "Includes bulletins originating from this sources whose group id match this regular expression.",
-                    required = false
+                    value = "Includes bulletins originating from this sources whose group id match this regular expression."
             )
             @QueryParam("groupId") BulletinBoardPatternParameter groupId,
             @ApiParam(
-                    value = "The number of bulletins to limit the response to.",
-                    required = false
+                    value = "The number of bulletins to limit the response to."
             )
             @QueryParam("limit") IntegerParameter limit) throws InterruptedException {
 
@@ -1773,13 +1935,11 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getProcessorStatus(
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the status.",
-                    required = false
+                    value = "The id of the node where to get the status."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
@@ -1846,13 +2006,11 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getInputPortStatus(
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the status.",
-                    required = false
+                    value = "The id of the node where to get the status."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
@@ -1919,13 +2077,11 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getOutputPortStatus(
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the status.",
-                    required = false
+                    value = "The id of the node where to get the status."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
@@ -1992,18 +2148,15 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getRemoteProcessGroupStatus(
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the status.",
-                    required = false
+                    value = "The id of the node where to get the status."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
-                    value = "The remote process group id.",
-                    required = true
+                    value = "The remote process group id."
             )
             @PathParam("id") String id) throws InterruptedException {
 
@@ -2068,18 +2221,15 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getProcessGroupStatus(
             @ApiParam(
-                    value = "Whether all descendant groups and the status of their content will be included. Optional, defaults to false",
-                    required = false
+                    value = "Whether all descendant groups and the status of their content will be included. Optional, defaults to false"
             )
             @QueryParam("recursive") @DefaultValue(RECURSIVE) Boolean recursive,
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the status.",
-                    required = false
+                    value = "The id of the node where to get the status."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
@@ -2146,13 +2296,11 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getConnectionStatus(
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the status.",
-                    required = false
+                    value = "The id of the node where to get the status."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
@@ -2219,13 +2367,11 @@ public class FlowResource extends ApplicationResource {
     )
     public Response getConnectionStatistics(
             @ApiParam(
-                    value = "Whether or not to include the breakdown per node. Optional, defaults to false",
-                    required = false
+                    value = "Whether or not to include the breakdown per node. Optional, defaults to false"
             )
             @QueryParam("nodewise") @DefaultValue(NODEWISE) Boolean nodewise,
             @ApiParam(
-                    value = "The id of the node where to get the statistics.",
-                    required = false
+                    value = "The id of the node where to get the statistics."
             )
             @QueryParam("clusterNodeId") String clusterNodeId,
             @ApiParam(
@@ -2550,33 +2696,27 @@ public class FlowResource extends ApplicationResource {
             )
             @QueryParam("count") IntegerParameter count,
             @ApiParam(
-                    value = "The field to sort on.",
-                    required = false
+                    value = "The field to sort on."
             )
             @QueryParam("sortColumn") String sortColumn,
             @ApiParam(
-                    value = "The direction to sort.",
-                    required = false
+                    value = "The direction to sort."
             )
             @QueryParam("sortOrder") String sortOrder,
             @ApiParam(
-                    value = "Include actions after this date.",
-                    required = false
+                    value = "Include actions after this date."
             )
             @QueryParam("startDate") DateTimeParameter startDate,
             @ApiParam(
-                    value = "Include actions before this date.",
-                    required = false
+                    value = "Include actions before this date."
             )
             @QueryParam("endDate") DateTimeParameter endDate,
             @ApiParam(
-                    value = "Include actions performed by this user.",
-                    required = false
+                    value = "Include actions performed by this user."
             )
             @QueryParam("userIdentity") String userIdentity,
             @ApiParam(
-                    value = "Include actions on this component.",
-                    required = false
+                    value = "Include actions on this component."
             )
             @QueryParam("sourceId") String sourceId) {
 
@@ -2763,6 +2903,14 @@ public class FlowResource extends ApplicationResource {
                 return;
             } catch (final ResourceNotFoundException e) {
                 // ignore as the component may not be a reporting task
+            }
+
+            try {
+                final Authorizable authorizable = lookup.getParameterProvider(componentId).getAuthorizable();
+                authorizable.authorize(authorizer, RequestAction.READ, user);
+                return;
+            } catch (final ResourceNotFoundException e) {
+                // ignore as the component may not be a parameter provider
             }
 
             // a component for the specified id could not be found, attempt to authorize based on read to the controller
@@ -2955,6 +3103,10 @@ public class FlowResource extends ApplicationResource {
 
     public void setReportingTaskResource(ReportingTaskResource reportingTaskResource) {
         this.reportingTaskResource = reportingTaskResource;
+    }
+
+    public void setParameterProviderResource(final ParameterProviderResource parameterProviderResource) {
+        this.parameterProviderResource = parameterProviderResource;
     }
 
     public void setAuthorizer(Authorizer authorizer) {

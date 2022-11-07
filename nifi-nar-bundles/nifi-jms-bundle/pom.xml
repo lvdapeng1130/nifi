@@ -20,7 +20,6 @@
         <version>1.18.0</version>
     </parent>
     <artifactId>nifi-jms-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
     <description>A bundle of processors that publish to and consume messages from JMS.</description>
     <modules>

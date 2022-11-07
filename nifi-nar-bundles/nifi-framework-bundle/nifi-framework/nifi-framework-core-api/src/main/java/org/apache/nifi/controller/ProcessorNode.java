@@ -45,6 +45,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 public abstract class ProcessorNode extends AbstractComponentNode implements Connectable {
+    public static final int DEFAULT_RETRY_COUNT = 10;
+    public static final BackoffMechanism DEFAULT_BACKOFF_MECHANISM = BackoffMechanism.PENALIZE_FLOWFILE;
+    public static final String DEFAULT_MAX_BACKOFF_PERIOD = "10 mins";
 
     protected final AtomicReference<ScheduledState> scheduledState;
 
@@ -174,7 +177,7 @@ public abstract class ProcessorNode extends AbstractComponentNode implements Con
      * states such as STOPPING and STARTING.
      *
      * @return the physical state of this processor [DISABLED, STOPPED, RUNNING,
-     *         STARTIING, STOPIING]
+     *         STARTING, STOPPING]
      */
     public ScheduledState getPhysicalScheduledState() {
         return this.scheduledState.get();

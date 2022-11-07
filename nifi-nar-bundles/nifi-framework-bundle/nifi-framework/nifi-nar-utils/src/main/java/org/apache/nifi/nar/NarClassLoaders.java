@@ -40,10 +40,8 @@ import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-
 /**
  * Used to initialize the extension and framework classloaders.
- *
  * The core framework should obtain a singleton reference from NarClassLoadersHolder.
  */
 public final class NarClassLoaders {
@@ -169,7 +167,7 @@ public final class NarClassLoaders {
         NiFiServer serverInstance = null;
         if (!narWorkingDirContents.isEmpty()) {
             final List<BundleDetails> narDetails = new ArrayList<>();
-            final Map<String,String> narCoordinatesToWorkingDir = new HashMap<>();
+            final Map<String, String> narCoordinatesToWorkingDir = new HashMap<>();
 
             // load the nar details which includes and nar dependencies
             for (final File unpackedNar : narWorkingDirContents) {
@@ -177,8 +175,7 @@ public final class NarClassLoaders {
                 try {
                      narDetail = getNarDetails(unpackedNar);
                 } catch (IllegalStateException e) {
-                    logger.warn("Unable to load NAR {} due to {}, skipping...",
-                            new Object[] {unpackedNar.getAbsolutePath(), e.getMessage()});
+                    logger.warn("Unable to load NAR {} due to {}, skipping...", unpackedNar.getAbsolutePath(), e.getMessage());
                     continue;
                 }
 
@@ -290,7 +287,7 @@ public final class NarClassLoaders {
             } else {
                 Map.Entry<NiFiServer, String> nifiServer = niFiServers.entrySet().iterator().next();
                 serverInstance = nifiServer.getKey();
-                logger.info("Found NiFiServer implementation {} in {}", new Object[]{serverInstance.getClass().getName(), nifiServer.getValue()});
+                logger.info("Found NiFiServer implementation {} in {}", serverInstance.getClass().getName(), nifiServer.getValue());
             }
 
             // see if any nars couldn't be loaded
@@ -365,7 +362,7 @@ public final class NarClassLoaders {
                         initContext.bundles.put(bundleDetail.getWorkingDirectory().getCanonicalPath(), bundle);
                     }
                 } catch (final Exception e) {
-                    logger.error("Unable to load NAR {} due to {}, skipping...", new Object[]{bundleDetail.getWorkingDirectory(), e.getMessage()});
+                    logger.error("Unable to load NAR {} due to {}, skipping...", bundleDetail.getWorkingDirectory(), e.getMessage());
                 }
             }
 
@@ -383,7 +380,7 @@ public final class NarClassLoaders {
         return new NarLoadResult(loadedBundles, skippedBundles);
     }
 
-    private ClassLoader createBundleClassLoader(final BundleDetails bundleDetail, final Map<String,Set<BundleCoordinate>> bundleIdToCoordinatesLookup, final boolean logDetails)
+    private ClassLoader createBundleClassLoader(final BundleDetails bundleDetail, final Map<String, Set<BundleCoordinate>> bundleIdToCoordinatesLookup, final boolean logDetails)
             throws IOException, ClassNotFoundException {
 
         ClassLoader bundleClassLoader = null;
@@ -457,7 +454,7 @@ public final class NarClassLoaders {
                 }
 
             } catch (Exception e) {
-                logger.error("Unable to load NAR {} due to {}, skipping...", new Object[]{unpackedNar.getAbsolutePath(), e.getMessage()});
+                logger.error("Unable to load NAR {} due to {}, skipping...", unpackedNar.getAbsolutePath(), e.getMessage());
             }
         }
         return narDetails;
@@ -536,7 +533,7 @@ public final class NarClassLoaders {
     }
 
     /**
-     * @return the Server class Bundle (NiFi Web/UI or MiNiFi)
+     * @return the Server class implementation (NiFi Web/UI or MiNiFi, e.g.)
      *
      * @throws IllegalStateException if the server Bundle has not been loaded
      */
@@ -562,7 +559,7 @@ public final class NarClassLoaders {
         try {
            return initContext.bundles.get(extensionWorkingDirectory.getCanonicalPath());
         } catch (final IOException ioe) {
-            if(logger.isDebugEnabled()){
+            if(logger.isDebugEnabled()) {
                 logger.debug("Unable to get extension classloader for working directory '{}'", extensionWorkingDirectory);
             }
             return null;

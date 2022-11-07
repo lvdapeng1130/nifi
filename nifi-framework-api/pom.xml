@@ -29,11 +29,5 @@
             <artifactId>nifi-api</artifactId>
             <version>1.18.0</version>
         </dependency>
-        <dependency>
-            <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-security-utils</artifactId>
-            <version>1.18.0</version>
-            <scope>provided</scope>
-        </dependency>
     </dependencies>
 </project>

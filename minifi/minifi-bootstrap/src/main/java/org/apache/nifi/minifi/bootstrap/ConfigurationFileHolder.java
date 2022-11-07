@@ -20,7 +20,15 @@ package org.apache.nifi.minifi.bootstrap;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Should be implemented by the class which bootstraps the agent.
+ */
 public interface ConfigurationFileHolder {
 
+    /**
+     * Retrieve the reference to the config file
+     *
+     * @return config file reference
+     */
     AtomicReference<ByteBuffer> getConfigFileReference();
 }

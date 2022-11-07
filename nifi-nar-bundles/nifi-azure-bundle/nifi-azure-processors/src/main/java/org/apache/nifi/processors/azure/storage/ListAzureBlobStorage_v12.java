@@ -41,7 +41,6 @@ import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.util.StandardValidators;
-import org.apache.nifi.processor.util.list.AbstractListProcessor;
 import org.apache.nifi.processor.util.list.ListedEntityTracker;
 import org.apache.nifi.processors.azure.storage.utils.AzureStorageUtils;
 import org.apache.nifi.processors.azure.storage.utils.BlobInfo;
@@ -53,6 +52,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -98,7 +98,7 @@ import static org.apache.nifi.processors.azure.storage.utils.BlobAttributes.ATTR
         "(by default). This allows the Processor to list only blobs that have been added or modified after this date the next time that the Processor is run. State is " +
         "stored across the cluster so that this Processor can be run on Primary Node only and if a new Primary Node is selected, the new node can pick up " +
         "where the previous node left off, without duplicating the data.")
-public class ListAzureBlobStorage_v12 extends AbstractListProcessor<BlobInfo> {
+public class ListAzureBlobStorage_v12 extends AbstractListAzureProcessor<BlobInfo> {
 
     public static final PropertyDescriptor CONTAINER = new PropertyDescriptor.Builder()
             .fromPropertyDescriptor(AzureStorageUtils.CONTAINER)
@@ -137,7 +137,12 @@ public class ListAzureBlobStorage_v12 extends AbstractListProcessor<BlobInfo> {
             LISTING_STRATEGY,
             TRACKING_STATE_CACHE,
             TRACKING_TIME_WINDOW,
-            INITIAL_LISTING_TARGET
+            INITIAL_LISTING_TARGET,
+            MIN_AGE,
+            MAX_AGE,
+            MIN_SIZE,
+            MAX_SIZE,
+            AzureStorageUtils.PROXY_CONFIGURATION_SERVICE
     ));
 
     private BlobServiceClient storageClient;
@@ -199,33 +204,39 @@ public class ListAzureBlobStorage_v12 extends AbstractListProcessor<BlobInfo> {
     }
 
     @Override
-    protected List<BlobInfo> performListing(ProcessContext context, Long minTimestamp, ListingMode listingMode) throws IOException {
-        String containerName = context.getProperty(CONTAINER).evaluateAttributeExpressions().getValue();
-        String prefix = context.getProperty(BLOB_NAME_PREFIX).evaluateAttributeExpressions().getValue();
+    protected List<BlobInfo> performListing(final ProcessContext context, final Long minTimestamp, final ListingMode listingMode) throws IOException {
+        final String containerName = context.getProperty(CONTAINER).evaluateAttributeExpressions().getValue();
+        final String prefix = context.getProperty(BLOB_NAME_PREFIX).evaluateAttributeExpressions().getValue();
+        final long minimumTimestamp = minTimestamp == null ? 0 : minTimestamp;
 
         try {
-            List<BlobInfo> listing = new ArrayList<>();
+            final List<BlobInfo> listing = new ArrayList<>();
 
-            BlobContainerClient containerClient = storageClient.getBlobContainerClient(containerName);
+            final BlobContainerClient containerClient = storageClient.getBlobContainerClient(containerName);
 
-            ListBlobsOptions options = new ListBlobsOptions()
+            final ListBlobsOptions options = new ListBlobsOptions()
                     .setPrefix(prefix);
 
-            for (BlobItem blob : containerClient.listBlobs(options, null)) {
-                BlobItemProperties properties = blob.getProperties();
+            final Iterator<BlobItem> result = containerClient.listBlobs(options, null).iterator();
 
-                Builder builder = new Builder()
-                        .containerName(containerName)
-                        .blobName(blob.getName())
-                        .primaryUri(String.format("%s/%s", containerClient.getBlobContainerUrl(), blob.getName()))
-                        .etag(properties.getETag())
-                        .blobType(properties.getBlobType().toString())
-                        .contentType(properties.getContentType())
-                        .contentLanguage(properties.getContentLanguage())
-                        .lastModifiedTime(properties.getLastModified().toInstant().toEpochMilli())
-                        .length(properties.getContentLength());
+            while (result.hasNext()) {
+                final BlobItem blob = result.next();
+                final BlobItemProperties properties = blob.getProperties();
 
-                listing.add(builder.build());
+                if (isFileInfoMatchesWithAgeAndSize(context, minimumTimestamp, properties.getLastModified().toInstant().toEpochMilli(), properties.getContentLength())) {
+                    final Builder builder = new Builder()
+                            .containerName(containerName)
+                            .blobName(blob.getName())
+                            .primaryUri(String.format("%s/%s", containerClient.getBlobContainerUrl(), blob.getName()))
+                            .etag(properties.getETag())
+                            .blobType(properties.getBlobType().toString())
+                            .contentType(properties.getContentType())
+                            .contentLanguage(properties.getContentLanguage())
+                            .lastModifiedTime(properties.getLastModified().toInstant().toEpochMilli())
+                            .length(properties.getContentLength());
+
+                    listing.add(builder.build());
+                }
             }
 
             return listing;

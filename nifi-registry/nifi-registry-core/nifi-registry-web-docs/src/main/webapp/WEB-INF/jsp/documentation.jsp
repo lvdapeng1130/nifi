@@ -17,7 +17,7 @@
 <%@ page contentType="text/html" pageEncoding="UTF-8" session="false" %>
 <%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core" %>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en" xml:lang="en" xmlns="http://www.w3.org/1999/xhtml">
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
@@ -68,7 +68,7 @@
                         <div class="header">Developer</div>
                         <div id="developer-links" class="component-links">
                             <ul>
-                                <li class="component-item"><a class="document-link rest-api" href="rest-api/rest-api.html" target="component-usage">REST API</a></li>
+                                <li class="component-item"><a class="document-link rest-api" href="rest-api/index.html" target="component-usage">REST API</a></li>
                             </ul>
                             <span class="no-matching no-components hidden">No matching developer guides</span>
                         </div>

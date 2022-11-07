@@ -35,5 +35,4 @@
             <artifactId>nifi-nifi-example-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

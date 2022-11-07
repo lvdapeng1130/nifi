@@ -27,6 +27,7 @@ import org.apache.nifi.controller.queue.AbstractFlowFileQueue;
 import org.apache.nifi.controller.queue.ConnectionEventListener;
 import org.apache.nifi.controller.queue.DropFlowFileRequest;
 import org.apache.nifi.controller.queue.DropFlowFileState;
+import org.apache.nifi.controller.status.FlowFileAvailability;
 import org.apache.nifi.controller.queue.FlowFileQueueContents;
 import org.apache.nifi.controller.queue.IllegalClusterStateException;
 import org.apache.nifi.controller.queue.LoadBalanceStrategy;
@@ -243,7 +244,10 @@ public class SocketLoadBalancedFlowFileQueue extends AbstractFlowFileQueue imple
             return;
         }
 
-        logger.debug("Setting queue {} on node {} as offloaded", this, clusterCoordinator.getLocalNodeIdentifier());
+        if (logger.isDebugEnabled()) {
+            logger.debug("Setting queue {} on node {} as offloaded. Current size: {}, Partition Sizes: {}", this, clusterCoordinator.getLocalNodeIdentifier(), size(), getPartitionSizes());
+        }
+
         offloaded = true;
 
         partitionWriteLock.lock();
@@ -270,8 +274,27 @@ public class SocketLoadBalancedFlowFileQueue extends AbstractFlowFileQueue imple
 
             // Update our partitioner so that we don't keep any data on the local partition
             setFlowFilePartitioner(new NonLocalPartitionPartitioner());
+
+            if (logger.isDebugEnabled()) {
+                logger.debug("Queue {} has now updated Partition on node {} for offload. Current size: {}, Partition Sizes: {}",
+                    this, clusterCoordinator.getLocalNodeIdentifier(), size(), getPartitionSizes());
+            }
         } finally {
             partitionWriteLock.unlock();
+        }
+    }
+
+    private Map<QueuePartition, QueueSize> getPartitionSizes() {
+        partitionReadLock.lock();
+        try {
+            final Map<QueuePartition, QueueSize> sizeMap = new HashMap<>();
+            for (final QueuePartition partition : queuePartitions) {
+                sizeMap.put(partition, partition.size());
+            }
+
+            return sizeMap;
+        } finally {
+            partitionReadLock.unlock();
         }
     }
 
@@ -557,6 +580,11 @@ public class SocketLoadBalancedFlowFileQueue extends AbstractFlowFileQueue imple
     @Override
     public boolean isEmpty() {
         return size().getObjectCount() == 0;
+    }
+
+    @Override
+    public FlowFileAvailability getFlowFileAvailability() {
+        return localPartition.getFlowFileAvailability();
     }
 
     @Override
@@ -893,7 +921,7 @@ public class SocketLoadBalancedFlowFileQueue extends AbstractFlowFileQueue imple
                 final List<FlowFileRecord> flowFileList = (flowFiles instanceof List) ? (List<FlowFileRecord>) flowFiles : new ArrayList<>(flowFiles);
                 partitionMap = Collections.singletonMap(partition, flowFileList);
 
-                logger.debug("Partitioner is static so Partitioned FlowFiles as: {}", partitionMap);
+                logger.debug("Partitioner {} is static so Partitioned FlowFiles as: {}", partitioner, partitionMap);
                 return partitionMap;
             }
 

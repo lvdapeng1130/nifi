@@ -31,6 +31,11 @@
             <artifactId>nifi-registry-ranger-plugin</artifactId>
             <version>1.18.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>jcl-over-slf4j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -51,6 +56,7 @@
                             <descriptors>
                                 <descriptor>src/main/assembly/extension.xml</descriptor>
                             </descriptors>
+                            <formats>zip</formats>
                         </configuration>
                     </execution>
                 </executions>
@@ -58,4 +64,37 @@
         </plugins>
     </build>
 
+    <profiles>
+        <profile>
+            <id>targz</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <configuration>
+                            <attach>true</attach>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>assembly-ranger-extension</id>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <phase>package</phase>
+                                <configuration>
+                                    <descriptors>
+                                        <descriptor>src/main/assembly/extension.xml</descriptor>
+                                    </descriptors>
+                                    <formats>tar.gz</formats>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

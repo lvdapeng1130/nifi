@@ -1131,7 +1131,7 @@ providing 2 total locations, including `nifi.registry.extension.dir.1`.
 
 The metadata database maintains the knowledge of which buckets exist, which versioned items belong to which buckets, as well as the version history for each item.
 
-Currently, NiFi Registry supports using H2, Postgres (9.x, 10.x), and MySQL (5.6, 5.7, 8.0) for the relational database engine.
+Currently, NiFi Registry supports using H2, Postgres (10.x - 13.x), and MySQL (8.0) for the relational database engine.
 
 NOTE: NiFi Registry 0.1.0 only supports H2.
 
@@ -1146,6 +1146,28 @@ For NiFi Registry 0.1.0, the location of the H2 database is specified by the pro
 For NiFi Registry 0.2.0 and forward, the location of the H2 database is specified as part of the JDBC URL property:
 
 `nifi.registry.db.url=jdbc:h2:./database/nifi-registry-primary;`
+
+==== Changing password in existing H2 database
+
+1. Download H2 driver from official repository https://www.h2database.com/html/download.html and place it somewhere accessible to NiFi Registry user
+
+2. Run H2 database shell
+
+  java -cp h2*.jar org.h2.tools.Shell
+
+3. Connect to database
+
+  Welcome to H2 Shell 1.4.200 (2019-10-14)
+  Exit with Ctrl+C
+  URL       jdbc:h2:./database/nifi-registry-primary
+  Driver    org.h2.Driver
+  User      nifireg
+  Password  
+  Connected
+
+4. Change password
+
+  ALTER USER nifireg SET PASSWORD 'NEW_PASSWORD';
 
 === Postgres
 

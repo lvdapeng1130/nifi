@@ -21,10 +21,12 @@ import org.apache.nifi.connectable.Connectable;
 import org.apache.nifi.connectable.Connection;
 import org.apache.nifi.connectable.Funnel;
 import org.apache.nifi.connectable.Port;
+import org.apache.nifi.controller.ParameterProviderNode;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.ReportingTaskNode;
 import org.apache.nifi.controller.exception.ProcessorInstantiationException;
 import org.apache.nifi.controller.label.Label;
+import org.apache.nifi.controller.parameter.ParameterProviderLookup;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.flowfile.FlowFilePrioritizer;
 import org.apache.nifi.groups.ProcessGroup;
@@ -32,19 +34,19 @@ import org.apache.nifi.groups.RemoteProcessGroup;
 import org.apache.nifi.parameter.Parameter;
 import org.apache.nifi.parameter.ParameterContext;
 import org.apache.nifi.parameter.ParameterContextManager;
-import org.apache.nifi.reporting.bo.KyCounter;
+import org.apache.nifi.parameter.ParameterProviderConfiguration;
+import org.apache.nifi.registry.flow.FlowRegistryClientNode;
 import org.apache.nifi.web.api.dto.FlowSnippetDTO;
-import org.apache.nifi.web.api.entity.ParameterContextReferenceEntity;
 
 import java.net.URL;
-import java.util.*;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
-public interface FlowManager {
+public interface FlowManager extends ParameterProviderLookup {
     String ROOT_GROUP_ID_ALIAS = "root";
     String DEFAULT_ROOT_GROUP_NAME = "NiFi Flow";
 
@@ -183,6 +185,8 @@ public interface FlowManager {
 
     void onProcessorRemoved(ProcessorNode processor);
 
+    Set<ProcessorNode> findAllProcessors(Predicate<ProcessorNode> processorNode);
+
 
     /**
      * <p>
@@ -227,10 +231,13 @@ public interface FlowManager {
      * @param firstTimeAdded whether or not this is the first time this
      * Processor is added to the graph. If {@code true}, will invoke methods
      * annotated with the {@link org.apache.nifi.annotation.lifecycle.OnAdded} annotation.
+     * @param classloaderIsolationKey a classloader key that can be used in order to specify which shared class loader can be used as the instance class loader's parent, or <code>null</code> if the
+     * parent class loader should be shared or if cloning ancestors is not necessary
      * @return new processor node
      * @throws NullPointerException if either arg is null
      */
-    ProcessorNode createProcessor(String type, String id, BundleCoordinate coordinate, Set<URL> additionalUrls, boolean firstTimeAdded, boolean registerLogObserver);
+    ProcessorNode createProcessor(String type, String id, BundleCoordinate coordinate, Set<URL> additionalUrls, boolean firstTimeAdded, boolean registerLogObserver,
+                                  String classloaderIsolationKey);
 
 
 
@@ -301,7 +308,7 @@ public interface FlowManager {
 
     ReportingTaskNode createReportingTask(String type, String id, BundleCoordinate bundleCoordinate, boolean firstTimeAdded);
 
-    ReportingTaskNode createReportingTask(String type, String id, BundleCoordinate bundleCoordinate, Set<URL> additionalUrls, boolean firstTimeAdded, boolean register);
+    ReportingTaskNode createReportingTask(String type, String id, BundleCoordinate bundleCoordinate, Set<URL> additionalUrls, boolean firstTimeAdded, boolean register, String classloaderIsolationKey);
 
     ReportingTaskNode getReportingTaskNode(String taskId);
 
@@ -309,15 +316,30 @@ public interface FlowManager {
 
     Set<ReportingTaskNode> getAllReportingTasks();
 
+    ParameterProviderNode createParameterProvider(String type, String id, BundleCoordinate bundleCoordinate, Set<URL> additionalUrls, boolean firstTimeAdded,
+                                                  boolean registerLogObserver);
 
+    ParameterProviderNode createParameterProvider(String type, String id, BundleCoordinate bundleCoordinate, boolean firstTimeAdded);
+
+    void removeParameterProvider(ParameterProviderNode parameterProvider);
+
+    Set<ParameterProviderNode> getAllParameterProviders();
+
+    FlowRegistryClientNode createFlowRegistryClient(
+            String type, String id, BundleCoordinate bundleCoordinate, Set<URL> additionalUrls, boolean firstTimeAdded, boolean registerLogObserver, String classloaderIsolationKey);
+
+    FlowRegistryClientNode getFlowRegistryClient(String id);
+
+    void removeFlowRegistryClientNode(FlowRegistryClientNode clientNode);
+
+    Set<FlowRegistryClientNode> getAllFlowRegistryClients();
 
     Set<ControllerServiceNode> getAllControllerServices();
 
     ControllerServiceNode getControllerServiceNode(String id);
 
     ControllerServiceNode createControllerService(String type, String id, BundleCoordinate bundleCoordinate, Set<URL> additionalUrls, boolean firstTimeAdded,
-                                                         boolean registerLogObserver);
-
+                                                         boolean registerLogObserver, String classloaderIsolationKey);
 
     Set<ControllerServiceNode> getRootControllerServices();
 
@@ -338,12 +360,15 @@ public interface FlowManager {
      * @param id                The unique id
      * @param name              The ParameterContext name
      * @param parameters        The Parameters
-     * @param parameterContexts Optional inherited ParameterContexts
+     * @param inheritedContextIds The identifiers of any Parameter Contexts that the newly created Parameter Context should inherit from. The order of the identifiers in the List determines the
+     * order in which parameters with conflicting names are resolved. I.e., the Parameter Context whose ID comes first in the List is preferred.
+     * @param parameterProviderConfiguration Optional configuration for a ParameterProvider
      * @return The created ParameterContext
      * @throws IllegalStateException If <code>parameterContexts</code> is not empty and this method is called without being wrapped
      * by {@link FlowManager#withParameterContextResolution(Runnable)}
      */
-    ParameterContext createParameterContext(String id, String name, Map<String, Parameter> parameters, List<ParameterContextReferenceEntity> parameterContexts);
+    ParameterContext createParameterContext(String id, String name, Map<String, Parameter> parameters, List<String> inheritedContextIds,
+                                            ParameterProviderConfiguration parameterProviderConfiguration);
 
     /**
      * Performs the given ParameterContext-related action, and then resolves all inherited ParameterContext references.
@@ -366,7 +391,8 @@ public interface FlowManager {
     ParameterContextManager getParameterContextManager();
 
     /**
-     * @return the number of each type of component (Processor, Controller Service, Process Group, Funnel, Input Port, Output Port, Reporting Task, Remote Process Group)
+     * @return the number of each type of component (Processor, Controller Service, Process Group, Funnel, Input Port, Output Port,
+     * Parameter Provider, Reporting Task, Remote Process Group)
      */
     Map<String, Integer> getComponentCounts();
 
@@ -383,8 +409,4 @@ public interface FlowManager {
      * @throws IllegalStateException if any of the components is not in a state that it can be deleted.
      */
     void purge();
-
-    List<KyCounter> getKyCounters();
-
-    KyCounter resetKyCounter(final String identifier);
 }

@@ -19,7 +19,7 @@ package org.apache.nifi.distributed.cache.operations;
 /**
  * Represents a distributed set cache operation which may be invoked.
  */
-public enum SetOperation {
+public enum SetOperation implements CacheOperation {
     ADD_IF_ABSENT("addIfAbsent"),
     CONTAINS("contains"),
     REMOVE("remove"),
@@ -31,6 +31,7 @@ public enum SetOperation {
         this.operation = operation;
     }
 
+    @Override
     public String value() {
         return operation;
     }

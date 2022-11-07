@@ -68,7 +68,7 @@
         <plugins>
             <!--
                 Precompile jsp's and add entries into the web.xml - the web.xml
-                is automatically places in ${project.build.directory}. Do not
+                is automatically placed in ${project.build.directory}. Do not
                 precompile canvas.jsp, summary.jsp, history.jsp, etc.
                 These jsp's need to have the artifacts version filtered in to
                 eliminate broswer caching issues and set up the proper includes.
@@ -234,8 +234,8 @@
                                         <include>url-search-params/README.md</include>
                                         <include>url-search-params/LICENSE.txt</include>
 
-                                        <include>lodash-core/distrib/lodash-core.min.js</include>
-                                        <include>lodash-core/distrib/README.md</include>
+                                        <include>lodash/lodash.min.js</include>
+                                        <include>lodash/README.md</include>
 
                                         <include>moment/min/moment.min.js</include>
                                         <include>moment/README.md</include>
@@ -374,7 +374,7 @@
             <plugin>
                 <groupId>com.github.eirslett</groupId>
                 <artifactId>frontend-maven-plugin</artifactId>
-                <version>1.12.0</version>
+                <version>${frontend.mvn.plugin.version}</version>
                 <configuration>
                     <installDirectory>${frontend.working.dir}</installDirectory>
                 </configuration>
@@ -395,7 +395,7 @@
                             <goal>npm</goal>
                         </goals>
                         <configuration>
-                            <arguments>--silent ci</arguments>
+                            <arguments>run ci</arguments>
                             <workingDirectory>${frontend.working.dir}</workingDirectory>
                         </configuration>
                     </execution>
@@ -541,6 +541,7 @@
                                                 <include>${staging.dir}/js/nf/canvas/nf-controller-service.js</include>
                                                 <include>${staging.dir}/js/nf/canvas/nf-controller-services.js</include>
                                                 <include>${staging.dir}/js/nf/canvas/nf-reporting-task.js</include>
+                                                <include>${staging.dir}/js/nf/canvas/nf-parameter-provider.js</include>
                                                 <include>${staging.dir}/js/nf/canvas/nf-settings.js</include>
                                                 <include>${staging.dir}/js/nf/canvas/controllers/nf-ng-breadcrumbs-controller.js</include>
                                                 <include>${staging.dir}/js/nf/canvas/controllers/nf-ng-canvas-header-controller.js</include>
@@ -734,6 +735,7 @@
                                             <output>${project.build.directory}/${project.build.finalName}/css/nf-canvas-all.css</output>
                                             <includes>
                                                 <include>${staging.dir}/css/reporting-task.css</include>
+                                                <include>${staging.dir}/css/parameter-provider.css</include>
                                                 <include>${staging.dir}/css/controller-service.css</include>
                                                 <include>${staging.dir}/css/processor-configuration.css</include>
                                                 <include>${staging.dir}/css/processor-details.css</include>
@@ -753,6 +755,7 @@
                                                 <include>${staging.dir}/css/new-port-dialog.css</include>
                                                 <include>${staging.dir}/css/new-controller-service-dialog.css</include>
                                                 <include>${staging.dir}/css/new-reporting-task-dialog.css</include>
+                                                <include>${staging.dir}/css/new-parameter-provider-dialog.css</include>
                                                 <include>${staging.dir}/css/new-parameter-context-dialog.css</include>
                                                 <include>${staging.dir}/css/graph.css</include>
                                                 <include>${staging.dir}/css/header.css</include>
@@ -888,7 +891,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-war-plugin</artifactId>
-                        <version>2.5</version>
+                        <version>3.3.2</version>
                         <configuration>
                             <packagingIncludes>
                                 assets/**/*,

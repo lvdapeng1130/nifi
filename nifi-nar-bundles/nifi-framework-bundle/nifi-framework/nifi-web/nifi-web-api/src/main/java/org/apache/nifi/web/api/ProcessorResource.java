@@ -32,8 +32,10 @@ import org.apache.nifi.authorization.resource.Authorizable;
 import org.apache.nifi.authorization.resource.OperationAuthorizable;
 import org.apache.nifi.authorization.user.NiFiUser;
 import org.apache.nifi.authorization.user.NiFiUserUtils;
+import org.apache.nifi.controller.BackoffMechanism;
 import org.apache.nifi.ui.extension.UiExtension;
 import org.apache.nifi.ui.extension.UiExtensionMapping;
+import org.apache.nifi.util.FormatUtils;
 import org.apache.nifi.web.NiFiServiceFacade;
 import org.apache.nifi.web.Revision;
 import org.apache.nifi.web.UiExtensionType;
@@ -101,8 +103,8 @@ public class ProcessorResource extends ApplicationResource {
     private static final Logger logger = LoggerFactory.getLogger(ProcessorResource.class);
 
     private static final String VERIFICATION_REQUEST_TYPE = "verification-request";
-    private RequestManager<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> updateRequestManager =
-        new AsyncRequestManager<>(100, TimeUnit.MINUTES.toMillis(1L), "Verify Processor Config Thread");
+    private RequestManager<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> configVerificationRequestManager =
+            new AsyncRequestManager<>(100, TimeUnit.MINUTES.toMillis(1L), "Verify Processor Config Thread");
 
     private NiFiServiceFacade serviceFacade;
     private Authorizer authorizer;
@@ -401,7 +403,13 @@ public class ProcessorResource extends ApplicationResource {
                     value = "The property name.",
                     required = true
             )
-            @QueryParam("propertyName") final String propertyName) throws InterruptedException {
+            @QueryParam("propertyName") final String propertyName,
+            @ApiParam(
+                    value = "Property Descriptor requested sensitive status",
+                    defaultValue = "false"
+            )
+            @QueryParam("sensitive") final boolean sensitive
+    ) throws InterruptedException {
 
         // ensure the property name is specified
         if (propertyName == null) {
@@ -419,7 +427,7 @@ public class ProcessorResource extends ApplicationResource {
         });
 
         // get the property descriptor
-        final PropertyDescriptorDTO descriptor = serviceFacade.getProcessorPropertyDescriptor(id, propertyName);
+        final PropertyDescriptorDTO descriptor = serviceFacade.getProcessorPropertyDescriptor(id, propertyName, sensitive);
 
         // generate the response entity
         final PropertyDescriptorEntity entity = new PropertyDescriptorEntity();
@@ -708,7 +716,8 @@ public class ProcessorResource extends ApplicationResource {
         final NiFiUser user = NiFiUserUtils.getNiFiUser();
 
         // request manager will ensure that the current is the user that submitted this request
-        final AsynchronousWebRequest<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> asyncRequest = updateRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
+        final AsynchronousWebRequest<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> asyncRequest = configVerificationRequestManager
+                .getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
         final VerifyConfigRequestEntity updateRequestEntity = createVerifyProcessorConfigRequestEntity(asyncRequest, requestId);
         return generateOkResponse(updateRequestEntity).build();
     }
@@ -750,7 +759,7 @@ public class ProcessorResource extends ApplicationResource {
         if (!twoPhaseRequest || executionPhase) {
             // request manager will ensure that the current is the user that submitted this request
             final AsynchronousWebRequest<VerifyConfigRequestEntity, List<ConfigVerificationResultDTO>> asyncRequest =
-                updateRequestManager.removeRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
+                    configVerificationRequestManager.removeRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
 
             if (!asyncRequest.isComplete()) {
                 asyncRequest.cancel();
@@ -762,7 +771,7 @@ public class ProcessorResource extends ApplicationResource {
 
         if (isValidationPhase(httpServletRequest)) {
             // Perform authorization by attempting to get the request
-            updateRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
+            configVerificationRequestManager.getRequest(VERIFICATION_REQUEST_TYPE, requestId, user);
             return generateContinueResponse().build();
         } else if (isCancellationPhase(httpServletRequest)) {
             return generateOkResponse().build();
@@ -832,6 +841,25 @@ public class ProcessorResource extends ApplicationResource {
         if (proposedPosition != null) {
             if (proposedPosition.getX() == null || proposedPosition.getY() == null) {
                 throw new IllegalArgumentException("The x and y coordinate of the proposed position must be specified.");
+            }
+        }
+
+        final ProcessorConfigDTO processorConfig = requestProcessorDTO.getConfig();
+        if (processorConfig != null) {
+            if (processorConfig.getRetryCount() != null && processorConfig.getRetryCount() < 0) {
+                throw new IllegalArgumentException("Retry Count should not be less than zero.");
+            }
+
+            if (processorConfig.getBackoffMechanism() != null) {
+                try {
+                    BackoffMechanism.valueOf(processorConfig.getBackoffMechanism());
+                } catch (Exception e) {
+                    throw new IllegalArgumentException("Backoff Mechanism " + processorConfig.getBackoffMechanism() + " is invalid.");
+                }
+            }
+
+            if (processorConfig.getMaxBackoffPeriod() != null && !FormatUtils.TIME_DURATION_PATTERN.matcher(processorConfig.getMaxBackoffPeriod()).matches()) {
+                throw new IllegalArgumentException("Max Backoff Period should be specified as time, for example 5 mins");
             }
         }
 
@@ -1074,7 +1102,7 @@ public class ProcessorResource extends ApplicationResource {
             }
         };
 
-        updateRequestManager.submitRequest(VERIFICATION_REQUEST_TYPE, requestId, request, updateTask);
+        configVerificationRequestManager.submitRequest(VERIFICATION_REQUEST_TYPE, requestId, request, updateTask);
 
         // Generate the response
         final VerifyConfigRequestEntity resultsEntity = createVerifyProcessorConfigRequestEntity(request, requestId);

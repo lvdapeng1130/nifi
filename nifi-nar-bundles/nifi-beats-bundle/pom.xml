@@ -23,12 +23,10 @@
     </parent>
 
     <artifactId>nifi-beats-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
 
     <modules>
         <module>nifi-beats-processors</module>
         <module>nifi-beats-nar</module>
     </modules>
-
 </project>

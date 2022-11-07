@@ -22,31 +22,32 @@ import org.apache.nifi.controller.ControllerService;
 import org.apache.nifi.documentation.DocumentationWriter;
 import org.apache.nifi.documentation.example.ControllerServiceWithLogger;
 import org.apache.nifi.documentation.example.FullyDocumentedControllerService;
+import org.apache.nifi.documentation.example.FullyDocumentedParameterProvider;
 import org.apache.nifi.documentation.example.FullyDocumentedReportingTask;
 import org.apache.nifi.documentation.example.ReportingTaskWithLogger;
 import org.apache.nifi.init.ControllerServiceInitializer;
-import org.apache.nifi.init.ReportingTaskingInitializer;
+import org.apache.nifi.init.ParameterProviderInitializer;
+import org.apache.nifi.init.ReportingTaskInitializer;
 import org.apache.nifi.mock.MockControllerServiceInitializationContext;
 import org.apache.nifi.mock.MockReportingInitializationContext;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.nar.StandardExtensionDiscoveringManager;
 import org.apache.nifi.reporting.InitializationException;
 import org.apache.nifi.reporting.ReportingTask;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 import static org.apache.nifi.documentation.html.XmlValidator.assertContains;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class HtmlDocumentationWriterTest {
 
     private ExtensionManager extensionManager;
 
-    @Before
+    @BeforeEach
     public void setup() {
         extensionManager = new StandardExtensionDiscoveringManager();
     }
@@ -89,6 +90,9 @@ public class HtmlDocumentationWriterTest {
         assertContains(results, "PKCS12");
         assertContains(results, "Sensitive Property: true");
 
+        // property with null default value
+        assertContains(results, "Keystore Password</td><td></td>");
+
         // restricted
         assertContains(results, "controller service restriction description");
 
@@ -101,18 +105,64 @@ public class HtmlDocumentationWriterTest {
         assertContains(results, "Not Specified");
 
         // verify the right OnRemoved and OnShutdown methods were called
-        Assert.assertEquals(0, controllerService.getOnRemovedArgs());
-        Assert.assertEquals(0, controllerService.getOnRemovedNoArgs());
+        assertEquals(0, controllerService.getOnRemovedArgs());
+        assertEquals(0, controllerService.getOnRemovedNoArgs());
 
-        Assert.assertEquals(1, controllerService.getOnShutdownArgs());
-        Assert.assertEquals(1, controllerService.getOnShutdownNoArgs());
+        assertEquals(1, controllerService.getOnShutdownArgs());
+        assertEquals(1, controllerService.getOnShutdownNoArgs());
+    }
+
+    @Test
+    public void testDocumentParameterProvider() throws InitializationException, IOException {
+
+        FullyDocumentedParameterProvider parameterProvider = new FullyDocumentedParameterProvider();
+        ParameterProviderInitializer initializer = new ParameterProviderInitializer(extensionManager);
+        initializer.initialize(parameterProvider);
+
+        DocumentationWriter writer = new HtmlDocumentationWriter(extensionManager);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        writer.write(parameterProvider, baos, false);
+        initializer.teardown(parameterProvider);
+
+        String results = new String(baos.toByteArray());
+        XmlValidator.assertXmlValid(results);
+
+        // description
+        assertContains(results, "A helper parameter provider to do...");
+
+        // tags
+        assertContains(results, "first, second, third");
+
+        // properties
+        assertContains(results, "Include Regex");
+        assertContains(results, "A Regular Expression indicating what to include as parameters.");
+
+        // restricted
+        assertContains(results, "parameter provider restriction description");
+
+        // verify system resource considerations
+        assertContains(results, SystemResource.CPU.name());
+        assertContains(results, SystemResourceConsideration.DEFAULT_DESCRIPTION);
+        assertContains(results, SystemResource.DISK.name());
+        assertContains(results, "Customized disk usage description");
+        assertContains(results, SystemResource.MEMORY.name());
+        assertContains(results, "Not Specified");
+
+        // verify the right OnRemoved and OnShutdown methods were called
+        assertEquals(0, parameterProvider.getOnRemovedArgs());
+        assertEquals(0, parameterProvider.getOnRemovedNoArgs());
+
+        assertEquals(1, parameterProvider.getOnShutdownArgs());
+        assertEquals(1, parameterProvider.getOnShutdownNoArgs());
     }
 
     @Test
     public void testDocumentReportingTask() throws InitializationException, IOException {
 
         FullyDocumentedReportingTask reportingTask = new FullyDocumentedReportingTask();
-        ReportingTaskingInitializer initializer = new ReportingTaskingInitializer(extensionManager);
+        ReportingTaskInitializer initializer = new ReportingTaskInitializer(extensionManager);
         initializer.initialize(reportingTask);
 
         DocumentationWriter writer = new HtmlDocumentationWriter(extensionManager);
@@ -149,11 +199,11 @@ public class HtmlDocumentationWriterTest {
         assertContains(results, "Not Specified");
 
         // verify the right OnRemoved and OnShutdown methods were called
-        Assert.assertEquals(0, reportingTask.getOnRemovedArgs());
-        Assert.assertEquals(0, reportingTask.getOnRemovedNoArgs());
+        assertEquals(0, reportingTask.getOnRemovedArgs());
+        assertEquals(0, reportingTask.getOnRemovedNoArgs());
 
-        Assert.assertEquals(1, reportingTask.getOnShutdownArgs());
-        Assert.assertEquals(1, reportingTask.getOnShutdownNoArgs());
+        assertEquals(1, reportingTask.getOnShutdownArgs());
+        assertEquals(1, reportingTask.getOnShutdownNoArgs());
     }
 
     @Test

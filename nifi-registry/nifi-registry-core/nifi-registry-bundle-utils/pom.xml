@@ -27,9 +27,9 @@
             <version>1.18.0</version>
         </dependency>
         <dependency>
-            <groupId>com.fasterxml.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-xml</artifactId>
-            <version>${jackson.version}</version>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-extension-manifest-parser</artifactId>
+            <version>1.18.0</version>
         </dependency>
     </dependencies>
 
@@ -45,8 +45,12 @@
                     <groupId>jakarta.xml.bind</groupId>
                     <artifactId>jakarta.xml.bind-api</artifactId>
                 </dependency>
+                <dependency>
+                    <groupId>org.glassfish.jaxb</groupId>
+                    <artifactId>jaxb-runtime</artifactId>
+                    <scope>test</scope>
+                </dependency>
             </dependencies>
         </profile>
     </profiles>
-
 </project>

@@ -94,8 +94,8 @@ public class PublishKafka_2_0 extends AbstractProcessor {
             + "whether or not it is replicated. This is faster than <Guarantee Replicated Delivery> "
             + "but can result in data loss if a Kafka node crashes");
     static final AllowableValue DELIVERY_BEST_EFFORT = new AllowableValue("0", "Best Effort",
-        "FlowFile will be routed to success after successfully writing the content to a Kafka node, "
-            + "without waiting for a response. This provides the best performance but may result in data loss.");
+        "FlowFile will be routed to success after successfully sending the content to a Kafka node, "
+            + "without waiting for any acknowledgment from the node at all. This provides the best performance but may result in data loss.");
 
     static final AllowableValue ROUND_ROBIN_PARTITIONING = new AllowableValue(Partitioners.RoundRobinPartitioner.class.getName(),
         Partitioners.RoundRobinPartitioner.class.getSimpleName(),
@@ -127,7 +127,7 @@ public class PublishKafka_2_0 extends AbstractProcessor {
         .required(true)
         .expressionLanguageSupported(NONE)
         .allowableValues(DELIVERY_BEST_EFFORT, DELIVERY_ONE_NODE, DELIVERY_REPLICATED)
-        .defaultValue(DELIVERY_BEST_EFFORT.getValue())
+        .defaultValue(DELIVERY_REPLICATED.getValue())
         .build();
 
     static final PropertyDescriptor METADATA_WAIT_TIME = new Builder()

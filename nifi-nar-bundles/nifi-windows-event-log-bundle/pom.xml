@@ -18,7 +18,6 @@ language governing permissions and limitations under the License. -->
         <version>1.18.0</version>
     </parent>
 
-    <groupId>org.apache.nifi</groupId>
     <artifactId>nifi-windows-event-log-bundle</artifactId>
     <packaging>pom</packaging>
 
@@ -40,5 +39,4 @@ language governing permissions and limitations under the License. -->
             </dependency>
         </dependencies>
     </dependencyManagement>
-
 </project>

@@ -22,9 +22,7 @@
         <version>1.18.0</version>
     </parent>
 
-    <groupId>org.apache.nifi</groupId>
     <artifactId>nifi-ranger-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -33,25 +31,17 @@
 	    <module>nifi-ranger-resources</module>
     </modules>
 
+    <properties>
+        <ranger.hadoop.version>3.3.3</ranger.hadoop.version>
+    </properties>
+
     <dependencyManagement>
         <dependencies>
             <!-- Override zookeeper -->
             <dependency>
                 <groupId>org.apache.zookeeper</groupId>
                 <artifactId>zookeeper</artifactId>
-                <version>3.4.14</version>
-            </dependency>
-            <!-- Override commons-io:2.5 from ranger -->
-            <dependency>
-                <groupId>commons-io</groupId>
-                <artifactId>commons-io</artifactId>
-                <version>2.10.0</version>
-            </dependency>
-            <!-- Override snakeyaml:1.17 from ranger -->
-            <dependency>
-                <groupId>org.yaml</groupId>
-                <artifactId>snakeyaml</artifactId>
-                <version>1.29</version>
+                <version>${zookeeper.version}</version>
             </dependency>
             <!-- Override commons-compress -->
             <dependency>
@@ -65,19 +55,11 @@
                 <artifactId>commons-beanutils</artifactId>
                 <version>1.9.4</version>
             </dependency>
-            <!-- Override jackson-databind 2.9.10.4 from ranger -->
+            <!-- Override Hadoop -->
             <dependency>
-                <groupId>com.fasterxml.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${jackson.version}</version>
-            </dependency>
-            <!-- Override log4j 2.11.1 -->
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-bom</artifactId>
-                <version>2.14.1</version>
-                <scope>import</scope>
-                <type>pom</type>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-common</artifactId>
+                <version>${ranger.hadoop.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

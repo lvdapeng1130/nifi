@@ -28,10 +28,10 @@ import org.apache.nifi.cluster.manager.NodeResponse;
 import org.apache.nifi.components.ConfigurableComponent;
 import org.apache.nifi.controller.ScheduledState;
 import org.apache.nifi.controller.service.ControllerServiceState;
-import org.apache.nifi.registry.flow.FlowRegistryUtils;
-import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
-import org.apache.nifi.registry.flow.VersionedParameterContext;
 import org.apache.nifi.flow.VersionedProcessGroup;
+import org.apache.nifi.registry.flow.FlowRegistryUtils;
+import org.apache.nifi.registry.flow.RegisteredFlowSnapshot;
+import org.apache.nifi.flow.VersionedParameterContext;
 import org.apache.nifi.web.NiFiServiceFacade;
 import org.apache.nifi.web.ResourceNotFoundException;
 import org.apache.nifi.web.ResumeFlowException;
@@ -49,8 +49,10 @@ import org.apache.nifi.web.api.dto.RevisionDTO;
 import org.apache.nifi.web.api.entity.AffectedComponentEntity;
 import org.apache.nifi.web.api.entity.Entity;
 import org.apache.nifi.web.api.entity.FlowUpdateRequestEntity;
+import org.apache.nifi.web.api.entity.PortEntity;
 import org.apache.nifi.web.api.entity.ProcessGroupDescriptorEntity;
 import org.apache.nifi.web.api.entity.ProcessGroupEntity;
+import org.apache.nifi.web.api.entity.ProcessorEntity;
 import org.apache.nifi.web.util.AffectedComponentUtils;
 import org.apache.nifi.web.util.CancellableTimedPause;
 import org.apache.nifi.web.util.ComponentLifecycle;
@@ -85,7 +87,7 @@ import java.util.stream.Collectors;
  * @param <U>   Entity to capture the status and result of an update request
  */
 public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity, U extends FlowUpdateRequestEntity> extends ApplicationResource {
-
+    private static final String DISABLED_COMPONENT_STATE = "DISABLED";
     private static final Logger logger = LoggerFactory.getLogger(FlowUpdateResource.class);
 
     protected NiFiServiceFacade serviceFacade;
@@ -103,14 +105,14 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
      * Perform actual flow update
      */
     protected abstract ProcessGroupEntity performUpdateFlow(final String groupId, final Revision revision, final T requestEntity,
-                                                            final VersionedFlowSnapshot flowSnapshot, final String idGenerationSeed,
+                                                            final RegisteredFlowSnapshot flowSnapshot, final String idGenerationSeed,
                                                             final boolean verifyNotModified, final boolean updateDescendantVersionedFlows);
 
     /**
      * Create the entity that is passed for update flow replication
      */
     protected abstract Entity createReplicateUpdateFlowEntity(final Revision revision, final T requestEntity,
-                                                              final VersionedFlowSnapshot flowSnapshot);
+                                                              final RegisteredFlowSnapshot flowSnapshot);
 
     /**
      * Create the entity that captures the status and result of an update request
@@ -137,7 +139,7 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
      */
     protected Response initiateFlowUpdate(final String groupId, final T requestEntity, final boolean allowDirtyFlowUpdate,
                                           final String requestType, final String replicateUriPath,
-                                          final Supplier<VersionedFlowSnapshot> flowSnapshotSupplier) {
+                                          final Supplier<RegisteredFlowSnapshot> flowSnapshotSupplier) {
         // Verify the request
         final RevisionDTO revisionDto = requestEntity.getProcessGroupRevision();
         if (revisionDto == null) {
@@ -182,7 +184,7 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
         // 13. Re-Start all Processors, Funnels, Ports that are affected and not removed.
 
         // Step 0: Obtain the versioned flow snapshot to use for the update
-        final VersionedFlowSnapshot flowSnapshot = flowSnapshotSupplier.get();
+        final RegisteredFlowSnapshot flowSnapshot = flowSnapshotSupplier.get();
 
         // The new flow may not contain the same versions of components in existing flow. As a result, we need to update
         // the flow snapshot to contain compatible bundles.
@@ -190,6 +192,9 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
 
         // If there are any Controller Services referenced that are inherited from the parent group, resolve those to point to the appropriate Controller Service, if we are able to.
         serviceFacade.resolveInheritedControllerServices(flowSnapshot, groupId, user);
+
+        // If there are any Parameter Providers referenced by Parameter Contexts, resolve these to point to the appropriate Parameter Provider, if we are able to.
+        serviceFacade.resolveParameterProviders(flowSnapshot, user);
 
         // Step 1: Determine which components will be affected by updating the flow
         final Set<AffectedComponentEntity> affectedComponents = serviceFacade.getComponentsAffectedByFlowUpdate(groupId, flowSnapshot);
@@ -216,14 +221,13 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
 
     /**
      * Authorize read/write permissions for the given user on every component of the given flow in support of flow update.
-     *
-     * @param lookup        A lookup instance to use for retrieving components for authorization purposes
+     *  @param lookup        A lookup instance to use for retrieving components for authorization purposes
      * @param user          the user to authorize
      * @param groupId       the id of the process group being evaluated
      * @param flowSnapshot  the new flow contents to examine for restricted components
      */
     protected void authorizeFlowUpdate(final AuthorizableLookup lookup, final NiFiUser user, final String groupId,
-                                       final VersionedFlowSnapshot flowSnapshot) {
+                                       final RegisteredFlowSnapshot flowSnapshot) {
         // Step 2: Verify READ and WRITE permissions for user, for every component.
         final ProcessGroupAuthorizable groupAuthorizable = lookup.getProcessGroup(groupId);
         authorizeProcessGroup(groupAuthorizable, authorizer, lookup, RequestAction.READ, true,
@@ -297,13 +301,27 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
         return createUpdateRequestResponse(requestType, requestId, request, false);
     }
 
+    private boolean isActive(final AffectedComponentDTO affectedComponentDto) {
+        final String state = affectedComponentDto.getState();
+        if ("Running".equalsIgnoreCase(state) || "Starting".equalsIgnoreCase(state)) {
+            return true;
+        }
+
+        final Integer threadCount = affectedComponentDto.getActiveThreadCount();
+        if (threadCount != null && threadCount > 0) {
+            return true;
+        }
+
+        return false;
+    }
+
     /**
      * Perform the specified flow update
      */
     private void updateFlow(final String groupId, final ComponentLifecycle componentLifecycle, final URI requestUri,
                             final Set<AffectedComponentEntity> affectedComponents, final boolean replicateRequest,
                             final String replicateUriPath, final Revision revision, final T requestEntity,
-                            final VersionedFlowSnapshot flowSnapshot, final AsynchronousWebRequest<T, T> asyncRequest,
+                            final RegisteredFlowSnapshot flowSnapshot, final AsynchronousWebRequest<T, T> asyncRequest,
                             final String idGenerationSeed, final boolean allowDirtyFlowUpdate)
             throws LifecycleManagementException, ResumeFlowException {
 
@@ -316,8 +334,8 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
         stoppableReferenceTypes.add(AffectedComponentDTO.COMPONENT_TYPE_OUTPUT_PORT);
 
         final Set<AffectedComponentEntity> runningComponents = affectedComponents.stream()
-                .filter(dto -> stoppableReferenceTypes.contains(dto.getComponent().getReferenceType()))
-                .filter(dto -> "Running".equalsIgnoreCase(dto.getComponent().getState()))
+                .filter(entity -> stoppableReferenceTypes.contains(entity.getComponent().getReferenceType()))
+                .filter(entity -> isActive(entity.getComponent()))
                 .collect(Collectors.toSet());
 
         logger.info("Stopping {} Processors", runningComponents.size());
@@ -451,14 +469,37 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
                 for (final AffectedComponentEntity componentEntity : componentsToStart) {
                     final AffectedComponentDTO componentDto = componentEntity.getComponent();
                     final String referenceType = componentDto.getReferenceType();
-                    if (!AffectedComponentDTO.COMPONENT_TYPE_REMOTE_INPUT_PORT.equals(referenceType)
-                            && !AffectedComponentDTO.COMPONENT_TYPE_REMOTE_OUTPUT_PORT.equals(referenceType)) {
-                        continue;
-                    }
 
-                    boolean startComponent;
+                    boolean startComponent = true;
                     try {
-                        startComponent = serviceFacade.isRemoteGroupPortConnected(componentDto.getProcessGroupId(), componentDto.getId());
+                        switch (referenceType) {
+                            case AffectedComponentDTO.COMPONENT_TYPE_REMOTE_INPUT_PORT:
+                            case AffectedComponentDTO.COMPONENT_TYPE_REMOTE_OUTPUT_PORT: {
+                                startComponent = serviceFacade.isRemoteGroupPortConnected(componentDto.getProcessGroupId(), componentDto.getId());
+                                break;
+                            }
+                            case AffectedComponentDTO.COMPONENT_TYPE_PROCESSOR: {
+                                final ProcessorEntity entity = serviceFacade.getProcessor(componentEntity.getId());
+                                if (entity == null || DISABLED_COMPONENT_STATE.equals(entity.getComponent().getState())) {
+                                    startComponent = false;
+                                }
+                                break;
+                            }
+                            case AffectedComponentDTO.COMPONENT_TYPE_INPUT_PORT: {
+                                final PortEntity entity = serviceFacade.getInputPort(componentEntity.getId());
+                                if (entity == null || DISABLED_COMPONENT_STATE.equals(entity.getComponent().getState())) {
+                                    startComponent = false;
+                                }
+                                break;
+                            }
+                            case AffectedComponentDTO.COMPONENT_TYPE_OUTPUT_PORT: {
+                                final PortEntity entity = serviceFacade.getOutputPort(componentEntity.getId());
+                                if (entity == null || DISABLED_COMPONENT_STATE.equals(entity.getComponent().getState())) {
+                                    startComponent = false;
+                                }
+                                break;
+                            }
+                        }
                     } catch (final ResourceNotFoundException rnfe) {
                         // Could occur if RPG is refreshed at just the right time.
                         startComponent = false;
@@ -646,12 +687,12 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
         private final String replicateUriPath;
         private final Set<AffectedComponentEntity> affectedComponents;
         private final boolean replicateRequest;
-        private final VersionedFlowSnapshot flowSnapshot;
+        private final RegisteredFlowSnapshot flowSnapshot;
 
         public InitiateUpdateFlowRequestWrapper(final T requestEntity, final ComponentLifecycle componentLifecycle,
                                                 final String requestType, final URI requestUri, final String replicateUriPath,
                                                 final Set<AffectedComponentEntity> affectedComponents,
-                                                final boolean replicateRequest, final VersionedFlowSnapshot flowSnapshot) {
+                                                final boolean replicateRequest, final RegisteredFlowSnapshot flowSnapshot) {
             this.requestEntity = requestEntity;
             this.componentLifecycle = componentLifecycle;
             this.requestType = requestType;
@@ -690,7 +731,7 @@ public abstract class FlowUpdateResource<T extends ProcessGroupDescriptorEntity,
             return replicateRequest;
         }
 
-        public VersionedFlowSnapshot getFlowSnapshot() {
+        public RegisteredFlowSnapshot getFlowSnapshot() {
             return flowSnapshot;
         }
     }

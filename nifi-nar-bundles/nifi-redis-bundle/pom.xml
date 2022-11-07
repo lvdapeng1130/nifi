@@ -23,13 +23,11 @@
     </parent>
 
     <artifactId>nifi-redis-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
 
     <properties>
-        <spring.data.redis.version>2.5.5</spring.data.redis.version>
-        <spring.version>5.3.11</spring.version>
-        <jedis.version>3.6.3</jedis.version>
+        <spring.data.redis.version>2.7.2</spring.data.redis.version>
+        <jedis.version>3.8.0</jedis.version>
     </properties>
 
     <modules>
@@ -38,16 +36,4 @@
         <module>nifi-redis-extensions</module>
         <module>nifi-redis-nar</module>
     </modules>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.springframework</groupId>
-                <artifactId>spring-framework-bom</artifactId>
-                <version>${spring.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 </project>

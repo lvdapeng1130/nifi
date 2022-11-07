@@ -41,5 +41,4 @@
             <artifactId>nifi-influxdb-processors</artifactId>
         </dependency>
     </dependencies>
-
 </project>

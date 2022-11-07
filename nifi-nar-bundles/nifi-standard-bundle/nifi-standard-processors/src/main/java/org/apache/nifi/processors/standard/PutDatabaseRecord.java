@@ -84,6 +84,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -479,10 +480,13 @@ public class PutDatabaseRecord extends AbstractProcessor {
         }
 
         final DBCPService dbcpService = context.getProperty(DBCP_SERVICE).asControllerService(DBCPService.class);
-        final Connection connection = dbcpService.getConnection(flowFile.getAttributes());
+        Optional<Connection> connectionHolder = Optional.empty();
 
         boolean originalAutoCommit = false;
         try {
+            final Connection connection = dbcpService.getConnection(flowFile.getAttributes());
+            connectionHolder = Optional.of(connection);
+
             originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
 
@@ -513,25 +517,31 @@ public class PutDatabaseRecord extends AbstractProcessor {
                 session.transfer(flowFile, relationship);
             }
 
-            try {
-                connection.rollback();
-            } catch (final Exception e1) {
-                getLogger().error("Failed to rollback JDBC transaction", e1);
-            }
+            connectionHolder.ifPresent(connection -> {
+                try {
+                    connection.rollback();
+                } catch (final Exception rollbackException) {
+                    getLogger().error("Failed to rollback JDBC transaction", rollbackException);
+                }
+            });
         } finally {
             if (originalAutoCommit) {
-                try {
-                    connection.setAutoCommit(true);
-                } catch (final Exception e) {
-                    getLogger().warn("Failed to set auto-commit back to true on connection {} after finishing update", connection);
-                }
+                connectionHolder.ifPresent(connection -> {
+                    try {
+                        connection.setAutoCommit(true);
+                    } catch (final Exception autoCommitException) {
+                        getLogger().warn("Failed to set auto-commit back to true on connection", autoCommitException);
+                    }
+                });
             }
 
-            try {
-                connection.close();
-            } catch (final Exception e) {
-                getLogger().warn("Failed to close database connection", e);
-            }
+            connectionHolder.ifPresent(connection -> {
+                try {
+                    connection.close();
+                } catch (final Exception closeException) {
+                    getLogger().warn("Failed to close database connection", closeException);
+                }
+            });
         }
     }
 
@@ -603,22 +613,29 @@ public class PutDatabaseRecord extends AbstractProcessor {
             throw new IllegalArgumentException(format("Cannot process %s because Table Name is null or empty", flowFile));
         }
 
-        // Always get the primary keys if Update Keys is empty. Otherwise if we have an Insert statement first, the table will be
-        // cached but the primary keys will not be retrieved, causing future UPDATE statements to not have primary keys available
-        final boolean includePrimaryKeys = updateKeys == null;
-
         final SchemaKey schemaKey = new PutDatabaseRecord.SchemaKey(catalog, schemaName, tableName);
-        final TableSchema tableSchema = schemaCache.get(schemaKey, key -> {
-            try {
-                final TableSchema schema = TableSchema.from(con, catalog, schemaName, tableName, settings.translateFieldNames, includePrimaryKeys, log);
-                getLogger().debug("Fetched Table Schema {} for table name {}", schema, tableName);
-                return schema;
-            } catch (SQLException e) {
-                throw new ProcessException(e);
+        final TableSchema tableSchema;
+        try {
+            tableSchema = schemaCache.get(schemaKey, key -> {
+                try {
+                    final TableSchema schema = TableSchema.from(con, catalog, schemaName, tableName, settings.translateFieldNames, updateKeys, log);
+                    getLogger().debug("Fetched Table Schema {} for table name {}", schema, tableName);
+                    return schema;
+                } catch (SQLException e) {
+                    // Wrap this in a runtime exception, it is unwrapped in the outer try
+                    throw new ProcessException(e);
+                }
+            });
+            if (tableSchema == null) {
+                throw new IllegalArgumentException("No table schema specified!");
             }
-        });
-        if (tableSchema == null) {
-            throw new IllegalArgumentException("No table schema specified!");
+        } catch (ProcessException pe) {
+            // Unwrap the SQLException if one occurred
+            if (pe.getCause() instanceof SQLException) {
+                throw (SQLException) pe.getCause();
+            } else {
+                throw pe;
+            }
         }
 
         // build the fully qualified table name
@@ -660,6 +677,8 @@ public class PutDatabaseRecord extends AbstractProcessor {
                             throw new IllegalArgumentException(format("Statement Type %s is not valid, FlowFile %s", statementType, flowFile));
                         }
 
+                        // Log debug sqlHolder
+                        log.debug("Generated SQL: {}", sqlHolder.getSql());
                         // Create the Prepared Statement
                         final PreparedStatement preparedStatement = con.prepareStatement(sqlHolder.getSql());
 
@@ -933,7 +952,7 @@ public class PutDatabaseRecord extends AbstractProcessor {
         }
     }
 
-    private String generateTableName(final DMLSettings settings, final String catalog, final String schemaName, final String tableName, final TableSchema tableSchema) {
+    String generateTableName(final DMLSettings settings, final String catalog, final String schemaName, final String tableName, final TableSchema tableSchema) {
         final StringBuilder tableNameBuilder = new StringBuilder();
         if (catalog != null) {
             if (settings.quoteTableName) {
@@ -1189,14 +1208,11 @@ public class PutDatabaseRecord extends AbstractProcessor {
                 }
             }
 
-            // Set the WHERE clause based on the Update Key values
-            sqlBuilder.append(" WHERE ");
             AtomicInteger whereFieldCount = new AtomicInteger(0);
-
             for (int i = 0; i < fieldCount; i++) {
-
                 RecordField field = recordSchema.getField(i);
                 String fieldName = field.getFieldName();
+                boolean firstUpdateKey = true;
 
                 final String normalizedColName = normalizeColumnName(fieldName, settings.translateFieldNames);
                 final ColumnDescription desc = tableSchema.getColumns().get(normalizeColumnName(fieldName, settings.translateFieldNames));
@@ -1207,14 +1223,18 @@ public class PutDatabaseRecord extends AbstractProcessor {
 
                         if (whereFieldCount.getAndIncrement() > 0) {
                             sqlBuilder.append(" AND ");
+                        } else if (firstUpdateKey) {
+                            // Set the WHERE clause based on the Update Key values
+                            sqlBuilder.append(" WHERE ");
+                            firstUpdateKey = false;
                         }
 
                         if (settings.escapeColumnNames) {
                             sqlBuilder.append(tableSchema.getQuotedIdentifierString())
-                                    .append(normalizedColName)
+                                    .append(desc.getColumnName())
                                     .append(tableSchema.getQuotedIdentifierString());
                         } else {
-                            sqlBuilder.append(normalizedColName);
+                            sqlBuilder.append(desc.getColumnName());
                         }
                         sqlBuilder.append(" = ?");
                         includedColumns.add(i);
@@ -1363,10 +1383,6 @@ public class PutDatabaseRecord extends AbstractProcessor {
                     getLogger().warn(missingColMessage);
                 }
             }
-            // Optionally quote the name before returning
-            if (settings.escapeColumnNames) {
-                normalizedKeyColumnName = quoteString + normalizedKeyColumnName + quoteString;
-            }
             normalizedKeyColumnNames.add(normalizedKeyColumnName);
         }
 
@@ -1383,7 +1399,7 @@ public class PutDatabaseRecord extends AbstractProcessor {
         private Map<String, ColumnDescription> columns;
         private String quotedIdentifierString;
 
-        private TableSchema(final List<ColumnDescription> columnDescriptions, final boolean translateColumnNames,
+        TableSchema(final List<ColumnDescription> columnDescriptions, final boolean translateColumnNames,
                             final Set<String> primaryKeyColumnNames, final String quotedIdentifierString) {
             this.columns = new LinkedHashMap<>();
             this.primaryKeyColumnNames = primaryKeyColumnNames;
@@ -1419,7 +1435,7 @@ public class PutDatabaseRecord extends AbstractProcessor {
         }
 
         public static TableSchema from(final Connection conn, final String catalog, final String schema, final String tableName,
-                                       final boolean translateColumnNames, final boolean includePrimaryKeys, ComponentLog log) throws SQLException {
+                                       final boolean translateColumnNames, final String updateKeys, ComponentLog log) throws SQLException {
             final DatabaseMetaData dmd = conn.getMetaData();
 
             try (final ResultSet colrs = dmd.getColumns(catalog, schema, tableName, "%")) {
@@ -1455,13 +1471,18 @@ public class PutDatabaseRecord extends AbstractProcessor {
                 }
 
                 final Set<String> primaryKeyColumns = new HashSet<>();
-                if (includePrimaryKeys) {
+                if (updateKeys == null) {
                     try (final ResultSet pkrs = dmd.getPrimaryKeys(catalog, schema, tableName)) {
 
                         while (pkrs.next()) {
                             final String colName = pkrs.getString("COLUMN_NAME");
                             primaryKeyColumns.add(normalizeColumnName(colName, translateColumnNames));
                         }
+                    }
+                } else {
+                    // Parse the Update Keys field and normalize the column names
+                    for (final String updateKey : updateKeys.split(",")) {
+                        primaryKeyColumns.add(normalizeColumnName(updateKey.trim(), translateColumnNames));
                     }
                 }
 
@@ -1667,7 +1688,7 @@ public class PutDatabaseRecord extends AbstractProcessor {
         // Quote table name?
         private final boolean quoteTableName;
 
-        private DMLSettings(ProcessContext context) {
+        DMLSettings(ProcessContext context) {
             translateFieldNames = context.getProperty(TRANSLATE_FIELD_NAMES).asBoolean();
             ignoreUnmappedFields = IGNORE_UNMATCHED_FIELD.getValue().equalsIgnoreCase(context.getProperty(UNMATCHED_FIELD_BEHAVIOR).getValue());
 

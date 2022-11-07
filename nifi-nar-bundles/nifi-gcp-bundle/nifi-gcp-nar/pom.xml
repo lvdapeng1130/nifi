@@ -41,6 +41,10 @@
             <artifactId>nifi-gcp-processors</artifactId>
             <version>1.18.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-gcp-parameter-providers</artifactId>
+            <version>1.18.0</version>
+        </dependency>
     </dependencies>
-
 </project>

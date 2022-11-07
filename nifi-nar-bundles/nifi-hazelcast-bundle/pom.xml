@@ -23,7 +23,6 @@
     </parent>
 
     <artifactId>nifi-hazelcast-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
 
     <modules>

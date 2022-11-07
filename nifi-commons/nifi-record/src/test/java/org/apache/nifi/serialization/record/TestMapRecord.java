@@ -18,11 +18,14 @@
 package org.apache.nifi.serialization.record;
 
 import org.apache.nifi.serialization.SimpleRecordSchema;
+import org.apache.nifi.serialization.record.type.ArrayDataType;
+import org.apache.nifi.serialization.record.type.RecordDataType;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,6 +33,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestMapRecord {
 
@@ -75,7 +79,7 @@ public class TestMapRecord {
     }
 
     private Set<String> set(final String... values) {
-        final Set<String> set = new HashSet<>();
+        final Set<String> set = new LinkedHashSet<>();
         for (final String value : values) {
             set.add(value);
         }
@@ -119,7 +123,7 @@ public class TestMapRecord {
         fields.add(new RecordField("foo", RecordFieldType.STRING.getDataType(), null, set("bar", "baz")));
 
         final RecordSchema schema = new SimpleRecordSchema(fields);
-        final Map<String, Object> values = new HashMap<>();
+        final Map<String, Object> values = new LinkedHashMap<>();
         values.put("baz", 1);
         values.put("bar", 33);
 
@@ -158,7 +162,7 @@ public class TestMapRecord {
         fields.add(new RecordField("foo", RecordFieldType.STRING.getDataType(), "hello", set("bar", "baz")));
 
         final RecordSchema schema = new SimpleRecordSchema(fields);
-        final Map<String, Object> values = new HashMap<>();
+        final Map<String, Object> values = new LinkedHashMap<>();
         values.put("baz", 1);
         values.put("bar", 33);
 
@@ -180,4 +184,54 @@ public class TestMapRecord {
         assertEquals("hello", record.getValue("bar"));
         assertEquals("hello", record.getValue("baz"));
     }
+
+    @Test
+    public void testNestedSchema() {
+        final String FOO_TEST_VAL = "test!";
+        final String NESTED_RECORD_VALUE = "Hello, world!";
+
+        final List<RecordField> fields = new ArrayList<>();
+        fields.add(new RecordField("foo", RecordFieldType.STRING.getDataType(), null, set("bar", "baz")));
+        List<RecordField> nestedFields = new ArrayList<>();
+        nestedFields.add(new RecordField("test", RecordFieldType.STRING.getDataType()));
+        RecordSchema nestedSchema = new SimpleRecordSchema(nestedFields);
+        RecordDataType nestedType = new RecordDataType(nestedSchema);
+        fields.add(new RecordField("nested", nestedType));
+        fields.add(new RecordField("list", new ArrayDataType(nestedType)));
+        RecordSchema fullSchema = new SimpleRecordSchema(fields);
+
+        Map<String, Object> nestedValues = new HashMap<>();
+        nestedValues.put("test", NESTED_RECORD_VALUE);
+        Record nestedRecord = new MapRecord(nestedSchema, nestedValues);
+        Map<String, Object> values = new HashMap<>();
+        values.put("foo", FOO_TEST_VAL);
+        values.put("nested", nestedRecord);
+
+        List<Record> list = new ArrayList<>();
+        for (int x = 0; x < 5; x++) {
+            list.add(new MapRecord(nestedSchema, nestedValues));
+        }
+        values.put("list", list);
+
+        Record record = new MapRecord(fullSchema, values);
+
+        Map<String, Object> fullConversion = ((MapRecord)record).toMap(true);
+        assertEquals(FOO_TEST_VAL, fullConversion.get("foo"));
+        assertTrue(fullConversion.get("nested") instanceof Map);
+
+        Map<String, Object> nested = (Map<String, Object>)fullConversion.get("nested");
+        assertEquals(1, nested.size());
+        assertEquals(NESTED_RECORD_VALUE, nested.get("test"));
+
+        assertTrue(fullConversion.get("list") instanceof List);
+        List recordList = (List) fullConversion.get("list");
+        assertEquals(5, recordList.size());
+        for (Object rec : recordList) {
+            assertTrue(rec instanceof Map);
+            Map<String, Object> map = (Map<String, Object>)rec;
+            assertEquals(1, map.size());
+            assertEquals(NESTED_RECORD_VALUE, map.get("test"));
+        }
+    }
+
 }

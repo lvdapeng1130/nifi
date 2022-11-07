@@ -21,8 +21,8 @@ language governing permissions and limitations under the License. -->
     <packaging>jar</packaging>
 
     <properties>
-        <jna.version>4.5.2</jna.version>
-        <javassist.version>3.23.1-GA</javassist.version>
+        <jna.version>5.10.0</jna.version>
+        <javassist.version>3.29.1-GA</javassist.version>
     </properties>
 
     <dependencies>
@@ -54,7 +54,6 @@ language governing permissions and limitations under the License. -->
         <dependency>
             <groupId>commons-io</groupId>
             <artifactId>commons-io</artifactId>
-            <version>2.10.0</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -69,5 +68,4 @@ language governing permissions and limitations under the License. -->
             <scope>test</scope>
         </dependency>
     </dependencies>
-
 </project>

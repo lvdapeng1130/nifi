@@ -36,6 +36,17 @@ import java.util.stream.Collectors;
 
 public class ControllerServiceEntityMerger implements ComponentEntityMerger<ControllerServiceEntity> {
 
+    @Override
+    public void merge(ControllerServiceEntity clientEntity, Map<NodeIdentifier, ControllerServiceEntity> entityMap) {
+        ComponentEntityMerger.super.merge(clientEntity, entityMap);
+        for (Map.Entry<NodeIdentifier, ControllerServiceEntity> entry : entityMap.entrySet()) {
+            final ControllerServiceEntity entityStatus = entry.getValue();
+            if (clientEntity != entityStatus) {
+                StatusMerger.merge(clientEntity.getStatus(), entry.getValue().getStatus());
+            }
+        }
+    }
+
     /**
      * Merges the ControllerServiceEntity responses.
      *
@@ -231,9 +242,13 @@ public class ControllerServiceEntityMerger implements ComponentEntityMerger<Cont
         for (Map.Entry<NodeIdentifier, ControllerServiceReferencingComponentEntity> entry : nodeEntities.entrySet()) {
             final NodeIdentifier nodeIdentifier = entry.getKey();
             final ControllerServiceReferencingComponentEntity nodeEntity = entry.getValue();
-            nodeEntity.getComponent().getDescriptors().values().forEach(propertyDescriptor -> {
-                propertyDescriptorMap.computeIfAbsent(propertyDescriptor.getName(), nodeIdToPropertyDescriptor -> new HashMap<>()).put(nodeIdentifier, propertyDescriptor);
-            });
+            final Map<String, PropertyDescriptorDTO> descriptors = nodeEntity.getComponent().getDescriptors();
+            if (descriptors != null) {
+                descriptors.values().forEach(propertyDescriptor -> {
+                    propertyDescriptorMap.computeIfAbsent(propertyDescriptor.getName(), nodeIdToPropertyDescriptor -> new HashMap<>()).put(nodeIdentifier, propertyDescriptor);
+                });
+            }
+
             nodeReferencingComponentsMap.put(nodeIdentifier, nodeEntity.getComponent().getReferencingComponents());
         }
 
@@ -243,8 +258,11 @@ public class ControllerServiceEntityMerger implements ComponentEntityMerger<Cont
             if (!nodePropertyDescriptors.isEmpty()) {
                 // get the name of the property descriptor and find that descriptor being returned to the client
                 final PropertyDescriptorDTO propertyDescriptor = nodePropertyDescriptors.iterator().next();
-                final PropertyDescriptorDTO clientPropertyDescriptor = clientEntity.getComponent().getDescriptors().get(propertyDescriptor.getName());
-                PropertyDescriptorDtoMerger.merge(clientPropertyDescriptor, propertyDescriptorByNodeId);
+                final Map<String, PropertyDescriptorDTO> descriptors = clientEntity.getComponent().getDescriptors();
+                if (descriptors != null) {
+                    final PropertyDescriptorDTO clientPropertyDescriptor = clientEntity.getComponent().getDescriptors().get(propertyDescriptor.getName());
+                    PropertyDescriptorDtoMerger.merge(clientPropertyDescriptor, propertyDescriptorByNodeId);
+                }
             }
         }
 

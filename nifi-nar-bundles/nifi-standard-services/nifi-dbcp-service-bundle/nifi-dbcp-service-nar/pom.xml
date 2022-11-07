@@ -38,5 +38,10 @@
             <artifactId>nifi-dbcp-service</artifactId>
             <version>1.18.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-hikari-dbcp-service</artifactId>
+            <version>1.18.0</version>
+        </dependency>
     </dependencies>
 </project>

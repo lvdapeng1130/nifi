@@ -24,6 +24,7 @@ import org.apache.nifi.nar.NarClassLoaders;
 import org.apache.nifi.nar.NarClassLoadersHolder;
 import org.apache.nifi.nar.NarUnpacker;
 import org.apache.nifi.nar.SystemBundle;
+import org.apache.nifi.nar.NarUnpackMode;
 import org.apache.nifi.util.FileUtils;
 import org.apache.nifi.util.NiFiProperties;
 import org.slf4j.Logger;
@@ -44,7 +45,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
 
 public class MiNiFi {
 
@@ -73,7 +73,7 @@ public class MiNiFi {
         final File kerberosConfigFile = properties.getKerberosConfigurationFile();
         if (kerberosConfigFile != null) {
             final String kerberosConfigFilePath = kerberosConfigFile.getAbsolutePath();
-            logger.info("Setting java.security.krb5.conf to {}", new Object[]{kerberosConfigFilePath});
+            logger.info("Setting java.security.krb5.conf to {}", kerberosConfigFilePath);
             System.setProperty("java.security.krb5.conf", kerberosConfigFilePath);
         }
 
@@ -85,7 +85,7 @@ public class MiNiFi {
         // register the shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             // shutdown the jetty server
-            shutdownHook(true);
+            shutdownHook(false);
         }));
 
         final String bootstrapPort = System.getProperty(BOOTSTRAP_PORT_PROPERTY);
@@ -125,7 +125,8 @@ public class MiNiFi {
         final Bundle systemBundle = SystemBundle.create(properties, rootClassLoader);
 
         // expand the nars
-        final ExtensionMapping extensionMapping = NarUnpacker.unpackNars(properties, FRAMEWORK_NAR_ID, systemBundle);
+        final NarUnpackMode unpackMode = properties.isUnpackNarsToUberJar() ? NarUnpackMode.UNPACK_TO_UBER_JAR : NarUnpackMode.UNPACK_INDIVIDUAL_JARS;
+        final ExtensionMapping extensionMapping = NarUnpacker.unpackNars(properties, FRAMEWORK_NAR_ID, systemBundle, unpackMode);
 
         // load the extensions classloaders
         NarClassLoaders narClassLoaders = NarClassLoadersHolder.getInstance();
@@ -151,6 +152,7 @@ public class MiNiFi {
         }
         minifiServer = (MiNiFiServer) nifiServer;
         Thread.currentThread().setContextClassLoader(minifiServer.getClass().getClassLoader());
+
         // Filter out the framework NAR from being loaded by the NiFiServer
         minifiServer.initialize(properties,
                 systemBundle,
@@ -261,7 +263,7 @@ public class MiNiFi {
     public static void main(String[] args) {
         logger.info("Launching MiNiFi...");
         try {
-            NiFiProperties niFiProperties = NiFiProperties.createBasicNiFiProperties(null, (Map<String,String>) null);
+            NiFiProperties niFiProperties = NiFiProperties.createBasicNiFiProperties(null, (Map<String, String>) null);
             new MiNiFi(niFiProperties);
         } catch (final Throwable t) {
             logger.error("Failure to launch MiNiFi due to " + t, t);

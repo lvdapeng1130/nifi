@@ -22,6 +22,7 @@ import org.apache.nifi.annotation.behavior.DynamicProperty;
 import org.apache.nifi.annotation.behavior.Restricted;
 import org.apache.nifi.annotation.behavior.Restriction;
 import org.apache.nifi.annotation.behavior.Stateful;
+import org.apache.nifi.annotation.behavior.SupportsSensitiveDynamicProperties;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.annotation.documentation.Tags;
@@ -76,7 +77,8 @@ import java.util.concurrent.atomic.AtomicReference;
         + "public void onStopped(ProcessContext context) methods to be invoked when the parent InvokeScriptedProcessor is scheduled or stopped, respectively.  "
         + "NOTE: The script will be loaded when the processor is populated with property values, see the Restrictions section for more security implications.  "
         + "Experimental: Impact of sustained usage not yet verified.")
-@DynamicProperty(name = "A script engine property to update", value = "The value to set it to",
+@SupportsSensitiveDynamicProperties
+@DynamicProperty(name = "Script Engine Binding property", value = "Binding property value passed to Script Runner",
         expressionLanguageScope = ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         description = "Updates a script engine property specified by the Dynamic Property's key with the value specified by the Dynamic Property's value")
 @Stateful(scopes = {Scope.LOCAL, Scope.CLUSTER},
@@ -223,9 +225,9 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
     public void setup() {
         if (scriptNeedsReload.get() || processor.get() == null) {
             if (ScriptingComponentHelper.isFile(scriptingComponentHelper.getScriptPath())) {
-                scriptNeedsReload.set(reloadScriptFile(scriptingComponentHelper.getScriptPath()));
+                scriptNeedsReload.set(!reloadScriptFile(scriptingComponentHelper.getScriptPath()));
             } else {
-                scriptNeedsReload.set(reloadScriptBody(scriptingComponentHelper.getScriptBody()));
+                scriptNeedsReload.set(!reloadScriptBody(scriptingComponentHelper.getScriptBody()));
             }
         }
     }
@@ -256,18 +258,12 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
                 scriptingComponentHelper.setScriptPath(newValue);
             } else if (ScriptingComponentUtils.SCRIPT_BODY.equals(descriptor)) {
                 scriptingComponentHelper.setScriptBody(newValue);
-            } else if (ScriptingComponentUtils.MODULES.equals(descriptor)) {
-                scriptingComponentHelper.setScriptBody(newValue);
             } else if (scriptingComponentHelper.SCRIPT_ENGINE.equals(descriptor)) {
                 scriptingComponentHelper.setScriptEngineName(newValue);
             }
 
             scriptNeedsReload.set(true);
             scriptRunner = null; //reset engine. This happens only when a processor is stopped, so there won't be any performance impact in run-time.
-            if (isConfigurationRestored()) {
-                // Once the configuration has been restored, each call to onPropertyModified() is due to a change made after the processor was loaded, so reload the script
-                setup();
-            }
         } else if (instance != null) {
             // If the script provides a Processor, call its onPropertyModified() method
             try {
@@ -286,11 +282,14 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
      * @return true if the script was loaded successfully; false otherwise
      */
     private boolean reloadScriptFile(final String scriptPath) {
+        if (StringUtils.isEmpty(scriptPath)) {
+            return false;
+        }
+
         final Collection<ValidationResult> results = new HashSet<>();
 
         try (final FileInputStream scriptStream = new FileInputStream(scriptPath)) {
             return reloadScript(IOUtils.toString(scriptStream, Charset.defaultCharset()));
-
         } catch (final Exception e) {
             final ComponentLog logger = getLogger();
             final String message = "Unable to load script: " + e;
@@ -307,7 +306,7 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
         // store the updated validation results
         validationResults.set(results);
 
-        // return whether there was any issues loading the configured script
+        // return whether there were any issues loading the configured script
         return results.isEmpty();
     }
 
@@ -318,10 +317,13 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
      * @return true if the script was loaded successfully; false otherwise
      */
     private boolean reloadScriptBody(final String scriptBody) {
+        if (StringUtils.isEmpty(scriptBody)) {
+            return false;
+        }
+
         final Collection<ValidationResult> results = new HashSet<>();
         try {
             return reloadScript(scriptBody);
-
         } catch (final Exception e) {
             final ComponentLog logger = getLogger();
             final String message = "Unable to load script: " + e;
@@ -338,7 +340,7 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
         // store the updated validation results
         validationResults.set(results);
 
-        // return whether there was any issues loading the configured script
+        // return whether there were any issues loading the configured script
         return results.isEmpty();
     }
 
@@ -366,7 +368,7 @@ public class InvokeScriptedProcessor extends AbstractSessionFactoryProcessor {
             }
 
             if (scriptRunner == null) {
-                throw new ProcessException("No script runner available!");
+                throw new ProcessException("No script runner available");
             }
             // get the engine and ensure its invocable
             ScriptEngine scriptEngine = scriptRunner.getScriptEngine();

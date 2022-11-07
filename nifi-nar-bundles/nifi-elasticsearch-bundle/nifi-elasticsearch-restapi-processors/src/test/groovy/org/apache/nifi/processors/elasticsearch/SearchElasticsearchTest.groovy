@@ -64,7 +64,7 @@ class SearchElasticsearchTest extends AbstractPaginatedJsonQueryElasticsearchTes
         testCounts(runner, 0, 0, 0, 0)
         assertThat(runner.getLogger().getErrorMessages().stream()
                 .anyMatch({ logMessage ->
-                    logMessage.getMsg().contains("Error processing flowfile") &&
+                    logMessage.getMsg().contains("Could not query documents") &&
                             logMessage.getThrowable().getMessage() == "Simulated IOException - scroll"
                 }),
                 is(true)
@@ -106,6 +106,10 @@ class SearchElasticsearchTest extends AbstractPaginatedJsonQueryElasticsearchTes
         final Instant expiration = Instant.ofEpochMilli(Long.parseLong(runner.getStateManager().getState(Scope.LOCAL).get(SearchElasticsearch.STATE_PAGE_EXPIRATION_TIMESTAMP)))
         while (expiration.isAfter(Instant.now())) {
             Thread.sleep(10)
+        }
+        if ("true".equalsIgnoreCase(System.getenv("CI"))) {
+            // allow extra time if running in CI Pipeline to prevent intermittent timing-issue failures
+            Thread.sleep(1000)
         }
         service.resetPageCount()
         runner.clearTransferState()

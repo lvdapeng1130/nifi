@@ -42,6 +42,7 @@ import org.apache.nifi.controller.status.ProcessGroupStatus
 import org.apache.nifi.controller.status.RunStatus
 import org.apache.nifi.diagnostics.StorageUsage
 import org.apache.nifi.diagnostics.SystemDiagnostics
+import org.apache.nifi.groups.ProcessGroup
 import org.apache.nifi.reporting.Bulletin
 import org.apache.nifi.reporting.BulletinRepository
 import org.apache.nifi.util.MockBulletinRepository
@@ -49,13 +50,17 @@ import org.apache.nifi.web.api.dto.AccessPolicyDTO
 import org.apache.nifi.web.api.dto.BulletinDTO
 import org.apache.nifi.web.api.dto.DtoFactory
 import org.apache.nifi.web.api.dto.EntityFactory
+import org.apache.nifi.web.api.dto.PermissionsDTO
 import org.apache.nifi.web.api.dto.RevisionDTO
 import org.apache.nifi.web.api.dto.UserDTO
 import org.apache.nifi.web.api.dto.UserGroupDTO
+import org.apache.nifi.web.api.dto.status.StatusHistoryDTO
 import org.apache.nifi.web.api.entity.BulletinEntity
+import org.apache.nifi.web.api.entity.StatusHistoryEntity
 import org.apache.nifi.web.api.entity.UserEntity
 import org.apache.nifi.web.controller.ControllerFacade
 import org.apache.nifi.web.dao.AccessPolicyDAO
+import org.apache.nifi.web.dao.ProcessGroupDAO
 import org.apache.nifi.web.dao.UserDAO
 import org.apache.nifi.web.dao.UserGroupDAO
 import org.apache.nifi.web.revision.DeleteRevisionTask
@@ -208,7 +213,7 @@ class StandardNiFiServiceFacadeSpec extends Specification {
         userEntityUpdateResult != null
         def userEntity = userEntityUpdateResult?.result
         if (isAuthorized) {
-            assert userEntity?.component?.id?.equals(userDto.id)
+            assert userEntity?.component?.getIdentifier?.equals(userDto.id)
             assert userEntity?.getPermissions?.canRead
             assert userEntity?.getPermissions?.canWrite
         } else {
@@ -317,7 +322,7 @@ class StandardNiFiServiceFacadeSpec extends Specification {
             def userEntity = userGroupDto.users.find { it.id.equals(userId) }?.component
             assert userEntity != null
             new User.Builder().identifier(userEntity.id).identity(userEntity.identity)
-                    .addGroups(userEntity.groups.collect { it.id } as Set)
+                    .addGroups(userEntity.groups.collect { it.getIdentifier } as Set)
                     .build()
         }
         userGroupDto.users.size() * revisionManager.get(_, _) >> { String id, ReadOnlyRevisionCallback callback ->
@@ -463,7 +468,7 @@ class StandardNiFiServiceFacadeSpec extends Specification {
 
         assert userGroupEntity != null
         if (isAuthorized) {
-            assert userGroupEntity?.component?.id?.equals(userGroupDto.id)
+            assert userGroupEntity?.component?.getIdentifier?.equals(userGroupDto.id)
             assert userGroupEntity?.getPermissions?.canRead
             assert userGroupEntity?.getPermissions?.canWrite
         } else {
@@ -764,7 +769,7 @@ class StandardNiFiServiceFacadeSpec extends Specification {
 
         assert accessPolicyEntity != null
         if (isAuthorized) {
-            assert accessPolicyEntity?.component?.id?.equals(accessPolicyDto.id)
+            assert accessPolicyEntity?.component?.getIdentifier?.equals(accessPolicyDto.id)
             assert accessPolicyEntity?.getPermissions?.canRead
             assert accessPolicyEntity?.getPermissions?.canWrite
         } else {
@@ -1007,6 +1012,24 @@ class StandardNiFiServiceFacadeSpec extends Specification {
         controllerFacade.getFlowFileEventRepository() >> flowFileEventRepository
         FlowFileEvent aggregateEvent = Mock()
         flowFileEventRepository.reportAggregateEvent() >> aggregateEvent
+
+        ProcessGroupDAO processGroupDAO = Mock()
+        serviceFacade.setProcessGroupDAO(processGroupDAO)
+        ProcessGroup processGroup = Mock()
+        processGroupDAO.getProcessGroup(rootGroupStatus.getId()) >> processGroup
+        DtoFactory dtoFactory = new DtoFactory()
+        serviceFacade.setDtoFactory(dtoFactory)
+        PermissionsDTO permissions = Mock()
+        dtoFactory.createPermissionsDto(processGroup) >> permissions
+        StatusHistoryEntity statusHistoryEntity = new StatusHistoryEntity()
+        StatusHistoryDTO statusHistory = new StatusHistoryDTO()
+        statusHistory.setAggregateSnapshots(Collections.EMPTY_LIST)
+        statusHistoryEntity.setStatusHistory(statusHistory)
+        controllerFacade.getProcessGroupStatusHistory("1234") >> statusHistory
+        EntityFactory entityFactory = new EntityFactory()
+        serviceFacade.setEntityFactory(entityFactory)
+        entityFactory.createStatusHistoryEntity(statusHistoryEntity, permissions) >> statusHistoryEntity
+        serviceFacade.getProcessGroupStatusHistory("1234") >> statusHistory
 
         // setting up connections (empty list for testing)
         Set<Connection> connections = new HashSet()

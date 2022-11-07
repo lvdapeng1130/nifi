@@ -22,15 +22,9 @@ import io.swagger.annotations.ApiModelProperty;
 import java.util.Map;
 import java.util.Set;
 
-public class VersionedProcessor extends VersionedComponent
-        implements VersionedConfigurableComponent, VersionedExtensionComponent {
+public class VersionedProcessor extends VersionedConfigurableExtension {
 
-    private Bundle bundle;
     private Map<String, String> style;
-
-    private String type;
-    private Map<String, String> properties;
-    private Map<String, VersionedPropertyDescriptor> propertyDescriptors;
     private String annotationData;
 
     private String schedulingPeriod;
@@ -44,6 +38,11 @@ public class VersionedProcessor extends VersionedComponent
     private Set<String> autoTerminatedRelationships;
     private ScheduledState scheduledState;
 
+    private Integer retryCount;
+    private Set<String> retriedRelationships;
+    private String backoffMechanism;
+    private String maxBackoffPeriod;
+
     @ApiModelProperty("The frequency with which to schedule the processor. The format of the value will depend on th value of schedulingStrategy.")
     public String getSchedulingPeriod() {
         return schedulingPeriod;
@@ -53,24 +52,13 @@ public class VersionedProcessor extends VersionedComponent
         this.schedulingPeriod = setSchedulingPeriod;
     }
 
-    @ApiModelProperty("Indcates whether the prcessor should be scheduled to run in event or timer driven mode.")
+    @ApiModelProperty("Indicates whether the processor should be scheduled to run in event or timer driven mode.")
     public String getSchedulingStrategy() {
         return schedulingStrategy;
     }
 
     public void setSchedulingStrategy(String schedulingStrategy) {
         this.schedulingStrategy = schedulingStrategy;
-    }
-
-    @Override
-    @ApiModelProperty("The type of Processor")
-    public String getType() {
-        return type;
-    }
-
-    @Override
-    public void setType(final String type) {
-        this.type = type;
     }
 
     @ApiModelProperty("Indicates the node where the process will execute.")
@@ -118,28 +106,6 @@ public class VersionedProcessor extends VersionedComponent
         this.concurrentlySchedulableTaskCount = concurrentlySchedulableTaskCount;
     }
 
-    @Override
-    @ApiModelProperty("The properties for the processor. Properties whose value is not set will only contain the property name.")
-    public Map<String, String> getProperties() {
-        return properties;
-    }
-
-    @Override
-    public void setProperties(Map<String, String> properties) {
-        this.properties = properties;
-    }
-
-    @Override
-    @ApiModelProperty("The property descriptors for the processor.")
-    public Map<String, VersionedPropertyDescriptor> getPropertyDescriptors() {
-        return propertyDescriptors;
-    }
-
-    @Override
-    public void setPropertyDescriptors(Map<String, VersionedPropertyDescriptor> propertyDescriptors) {
-        this.propertyDescriptors = propertyDescriptors;
-    }
-
     @ApiModelProperty("The annotation data for the processor used to relay configuration between a custom UI and the procesosr.")
     public String getAnnotationData() {
         return annotationData;
@@ -170,17 +136,6 @@ public class VersionedProcessor extends VersionedComponent
         this.runDurationMillis = runDurationMillis;
     }
 
-    @Override
-    @ApiModelProperty("Information about the bundle from which the component came")
-    public Bundle getBundle() {
-        return bundle;
-    }
-
-    @Override
-    public void setBundle(Bundle bundle) {
-        this.bundle = bundle;
-    }
-
     @ApiModelProperty("Stylistic data for rendering in a UI")
     public Map<String, String> getStyle() {
         return style;
@@ -204,4 +159,48 @@ public class VersionedProcessor extends VersionedComponent
         return ComponentType.PROCESSOR;
     }
 
+    @ApiModelProperty(
+            value = "Overall number of retries."
+    )
+    public Integer getRetryCount() {
+        return retryCount;
+    }
+
+    public void setRetryCount(Integer retryCount) {
+        this.retryCount = retryCount;
+    }
+
+    @ApiModelProperty(
+            value = "All the relationships should be retried."
+    )
+    public Set<String> getRetriedRelationships() {
+        return retriedRelationships;
+    }
+
+    public void setRetriedRelationships(Set<String> retriedRelationships) {
+        this.retriedRelationships = retriedRelationships;
+    }
+
+    @ApiModelProperty(
+            value = "Determines whether the FlowFile should be penalized or the processor should be yielded between retries.",
+            allowableValues = "PENALIZE_FLOWFILE, YIELD_PROCESSOR"
+    )
+    public String getBackoffMechanism() {
+        return backoffMechanism;
+    }
+
+    public void setBackoffMechanism(String backoffMechanism) {
+        this.backoffMechanism = backoffMechanism;
+    }
+
+    @ApiModelProperty(
+            value = "Maximum amount of time to be waited during a retry period."
+    )
+    public String getMaxBackoffPeriod() {
+        return maxBackoffPeriod;
+    }
+
+    public void setMaxBackoffPeriod(String maxBackoffPeriod) {
+        this.maxBackoffPeriod = maxBackoffPeriod;
+    }
 }

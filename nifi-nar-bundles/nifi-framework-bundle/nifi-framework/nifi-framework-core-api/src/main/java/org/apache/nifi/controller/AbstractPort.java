@@ -42,6 +42,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -62,6 +63,7 @@ public abstract class AbstractPort implements Port {
             .build();
 
     private static final TimeUnit DEFAULT_TIME_UNIT = TimeUnit.MILLISECONDS;
+    private static final String DEFAULT_MAX_BACKOFF_PERIOD = "10 mins";
 
     private final List<Relationship> relationships;
 
@@ -166,6 +168,15 @@ public abstract class AbstractPort implements Port {
 
     @Override
     public void setProcessGroup(final ProcessGroup newGroup) {
+        if (this.processGroup.get() != null && !Objects.equals(newGroup, this.processGroup.get())) {
+            // Process Group is changing. For a Port, we effectively want to consider this the same as
+            // deleting an old port and creating a new one, in terms of tracking the port to a versioned flow.
+            // This ensures that we have a unique versioned component id not only in the given process group but also
+            // between the given group and its parent and all children. This is important for ports because we can
+            // connect to/from them between Process Groups, so we need to ensure unique IDs.
+            versionedComponentId.set(null);
+        }
+
         this.processGroup.set(newGroup);
     }
 
@@ -464,7 +475,7 @@ public abstract class AbstractPort implements Port {
     }
 
     @Override
-    public void setScheduldingPeriod(final String schedulingPeriod) {
+    public void setSchedulingPeriod(final String schedulingPeriod) {
         final long schedulingNanos = FormatUtils.getTimeDuration(requireNonNull(schedulingPeriod), TimeUnit.NANOSECONDS);
         if (schedulingNanos < 0) {
             throw new IllegalArgumentException("Scheduling Period must be positive");
@@ -659,4 +670,52 @@ public abstract class AbstractPort implements Port {
             }
         }
     }
+
+    @Override
+    public int getRetryCount() {
+        return 0;
+    }
+
+    @Override
+    public void setRetryCount(Integer retryCount) {
+    }
+
+    @Override
+    public Set<String> getRetriedRelationships() {
+        return Collections.EMPTY_SET;
+    }
+
+    @Override
+    public void setRetriedRelationships(Set<String> retriedRelationships) {
+    }
+
+    @Override
+    public boolean isRelationshipRetried(Relationship relationship) {
+        return false;
+    }
+
+    @Override
+    public BackoffMechanism getBackoffMechanism() {
+        return BackoffMechanism.PENALIZE_FLOWFILE;
+    }
+
+    @Override
+    public void setBackoffMechanism(BackoffMechanism backoffMechanism) {
+    }
+
+    @Override
+    public String getMaxBackoffPeriod() {
+        return DEFAULT_MAX_BACKOFF_PERIOD;
+    }
+
+    @Override
+    public void setMaxBackoffPeriod(String maxBackoffPeriod) {
+    }
+
+    @Override
+    public String evaluateParameters(String value) {
+        return value;
+    }
+
+
 }

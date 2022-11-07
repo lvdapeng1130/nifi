@@ -37,12 +37,12 @@
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-processor-utils</artifactId>
+            <artifactId>nifi-security-socket-ssl</artifactId>
             <version>1.18.0</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-security-socket-ssl</artifactId>
+            <artifactId>nifi-event-transport</artifactId>
             <version>1.18.0</version>
         </dependency>
         <dependency>
@@ -62,7 +62,10 @@
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-buffer</artifactId>
-            <version>${netty.4.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
         </dependency>
     </dependencies>
 </project>

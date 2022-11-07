@@ -16,9 +16,10 @@
  */
 package org.apache.nifi.properties;
 
+import org.apache.nifi.property.protection.loader.PropertyProtectionURLClassLoader;
+import org.apache.nifi.property.protection.loader.PropertyProviderFactoryLoader;
 import org.apache.nifi.util.NiFiBootstrapUtils;
 import org.apache.nifi.util.NiFiProperties;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,12 +29,14 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
-import java.security.Security;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
@@ -48,12 +51,11 @@ public class NiFiPropertiesLoader {
     private static final String MIGRATION_INSTRUCTIONS = "See Admin Guide section [Updating the Sensitive Properties Key]";
     private static final String PROPERTIES_KEY_MESSAGE = String.format("Sensitive Properties Key [%s] not found: %s", NiFiProperties.SENSITIVE_PROPS_KEY, MIGRATION_INSTRUCTIONS);
 
+    private static final String SET_KEY_METHOD = "setKeyHex";
+
     private final String defaultPropertiesFilePath = NiFiBootstrapUtils.getDefaultApplicationPropertiesFilePath();
     private NiFiProperties instance;
     private String keyHex;
-
-    // Future enhancement: allow for external registration of new providers
-    private SensitivePropertyProviderFactory sensitivePropertyProviderFactory;
 
     public NiFiPropertiesLoader() {
     }
@@ -96,29 +98,14 @@ public class NiFiPropertiesLoader {
      * startup.
      *
      * @return the populated and decrypted NiFiProperties instance
-     * @throws IOException if there is a problem reading from the bootstrap.conf
-     *                     or nifi.properties files
      */
-    public static NiFiProperties loadDefaultWithKeyFromBootstrap() throws IOException {
+    public static NiFiProperties loadDefaultWithKeyFromBootstrap() {
         try {
-            // The default behavior of StandardSensitivePropertiesFactory is to use the key
-            // from bootstrap.conf if no key is provided
             return new NiFiPropertiesLoader().loadDefault();
         } catch (Exception e) {
             logger.warn("Encountered an error naively loading the nifi.properties file because one or more properties are protected: {}", e.getLocalizedMessage());
             throw e;
         }
-    }
-
-    private NiFiProperties loadDefault() {
-        return load(defaultPropertiesFilePath);
-    }
-
-    private SensitivePropertyProviderFactory getSensitivePropertyProviderFactory() {
-        if (sensitivePropertyProviderFactory == null) {
-            sensitivePropertyProviderFactory = StandardSensitivePropertyProviderFactory.withKey(keyHex);
-        }
-        return sensitivePropertyProviderFactory;
     }
 
     /**
@@ -130,30 +117,35 @@ public class NiFiPropertiesLoader {
      * @param file the file containing serialized properties
      * @return the ProtectedNiFiProperties instance
      */
-    ProtectedNiFiProperties readProtectedPropertiesFromDisk(File file) {
+    ProtectedNiFiProperties loadProtectedProperties(final File file) {
         if (file == null || !file.exists() || !file.canRead()) {
-            String path = (file == null ? "missing file" : file.getAbsolutePath());
-            logger.error("Cannot read from '{}' -- file is missing or not readable", path);
-            throw new IllegalArgumentException("NiFi properties file missing or unreadable");
+            throw new IllegalArgumentException(String.format("Application Properties [%s] not found", file));
         }
 
-        final Properties rawProperties = new Properties();
+        logger.info("Loading Application Properties [{}]", file);
+        final DuplicateDetectingProperties rawProperties = new DuplicateDetectingProperties();
+
         try (final InputStream inputStream = new BufferedInputStream(new FileInputStream(file))) {
             rawProperties.load(inputStream);
-            logger.info("Loaded {} properties from {}", rawProperties.size(), file.getAbsolutePath());
-
-            final Set<String> keys = rawProperties.stringPropertyNames();
-            for (final String key : keys) {
-                final String property = rawProperties.getProperty(key);
-                rawProperties.setProperty(key, property.trim());
-            }
-
-            return new ProtectedNiFiProperties(rawProperties);
-        } catch (final Exception ex) {
-            logger.error("Cannot load properties file due to {}", ex.getLocalizedMessage());
-            throw new RuntimeException("Cannot load properties file due to "
-                    + ex.getLocalizedMessage(), ex);
+        } catch (final Exception e) {
+            throw new RuntimeException(String.format("Loading Application Properties [%s] failed", file), e);
         }
+
+        if (!rawProperties.redundantKeySet().isEmpty()) {
+            logger.warn("Duplicate property keys with the same value were detected in the properties file: {}", String.join(", ", rawProperties.redundantKeySet()));
+        }
+        if (!rawProperties.duplicateKeySet().isEmpty()) {
+            throw new IllegalArgumentException("Duplicate property keys with different values were detected in the properties file: " + String.join(", ", rawProperties.duplicateKeySet()));
+        }
+
+        final Properties properties = new Properties();
+        final Set<String> keys = rawProperties.stringPropertyNames();
+        for (final String key : keys) {
+            final String property = rawProperties.getProperty(key);
+            properties.setProperty(key, property.trim());
+        }
+
+        return new ProtectedNiFiProperties(properties);
     }
 
     /**
@@ -166,20 +158,32 @@ public class NiFiPropertiesLoader {
      * @return the NiFiProperties instance
      */
     public NiFiProperties load(final File file) {
-        final ProtectedNiFiProperties protectedNiFiProperties = readProtectedPropertiesFromDisk(file);
-        if (protectedNiFiProperties.hasProtectedKeys()) {
-            Security.addProvider(new BouncyCastleProvider());
-            getSensitivePropertyProviderFactory()
-                    .getSupportedSensitivePropertyProviders()
-                    .forEach(protectedNiFiProperties::addSensitivePropertyProvider);
+        final ProtectedNiFiProperties protectedProperties = loadProtectedProperties(file);
+        final NiFiProperties properties;
+
+        if (protectedProperties.hasProtectedKeys()) {
+            final ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+
+            try {
+                final PropertyProtectionURLClassLoader protectionClassLoader = new PropertyProtectionURLClassLoader(contextClassLoader);
+                Thread.currentThread().setContextClassLoader(protectionClassLoader);
+
+                final PropertyProviderFactoryLoader factoryLoader = new PropertyProviderFactoryLoader();
+                final SensitivePropertyProviderFactory providerFactory = factoryLoader.getPropertyProviderFactory();
+                setBootstrapKey(providerFactory);
+                providerFactory.getSupportedProviders().forEach(protectedProperties::addSensitivePropertyProvider);
+
+                properties = protectedProperties.getUnprotectedProperties();
+
+                providerFactory.getSupportedProviders().forEach(SensitivePropertyProvider::cleanUp);
+            } finally {
+                Thread.currentThread().setContextClassLoader(contextClassLoader);
+            }
+        } else {
+            properties = protectedProperties.getUnprotectedProperties();
         }
-        NiFiProperties props = protectedNiFiProperties.getUnprotectedProperties();
-        if (protectedNiFiProperties.hasProtectedKeys()) {
-            getSensitivePropertyProviderFactory()
-                    .getSupportedSensitivePropertyProviders()
-                    .forEach(SensitivePropertyProvider::cleanUp);
-        }
-        return props;
+
+        return properties;
     }
 
     /**
@@ -217,6 +221,10 @@ public class NiFiPropertiesLoader {
         return instance;
     }
 
+    private NiFiProperties loadDefault() {
+        return load(defaultPropertiesFilePath);
+    }
+
     private NiFiProperties getDefaultProperties() {
         NiFiProperties defaultProperties = loadDefault();
         if (isKeyGenerationRequired(defaultProperties)) {
@@ -225,11 +233,18 @@ public class NiFiPropertiesLoader {
                 throw new SensitivePropertyProtectionException(PROPERTIES_KEY_MESSAGE);
             }
 
-            final File flowConfiguration = defaultProperties.getFlowConfigurationFile();
-            if (flowConfiguration.exists()) {
-                logger.error("Flow Configuration [{}] Found: Migration Required for blank Sensitive Properties Key [{}]", flowConfiguration, NiFiProperties.SENSITIVE_PROPS_KEY);
+            final File jsonFile = defaultProperties.getFlowConfigurationJsonFile();
+            if (jsonFile != null && jsonFile.exists()) {
+                logger.error("Flow Configuration [{}] Found: Migration Required for blank Sensitive Properties Key [{}]", jsonFile, NiFiProperties.SENSITIVE_PROPS_KEY);
                 throw new SensitivePropertyProtectionException(PROPERTIES_KEY_MESSAGE);
             }
+
+            final File xmlFile = defaultProperties.getFlowConfigurationFile();
+            if (xmlFile.exists()) {
+                logger.error("Flow Configuration [{}] Found: Migration Required for blank Sensitive Properties Key [{}]", xmlFile, NiFiProperties.SENSITIVE_PROPS_KEY);
+                throw new SensitivePropertyProtectionException(PROPERTIES_KEY_MESSAGE);
+            }
+
             setSensitivePropertiesKey();
             defaultProperties = loadDefault();
         }
@@ -264,5 +279,55 @@ public class NiFiPropertiesLoader {
     private static boolean isKeyGenerationRequired(final NiFiProperties properties) {
         final String configuredSensitivePropertiesKey = properties.getProperty(NiFiProperties.SENSITIVE_PROPS_KEY);
         return (configuredSensitivePropertiesKey == null || configuredSensitivePropertiesKey.length() == 0);
+    }
+
+    private void setBootstrapKey(final SensitivePropertyProviderFactory providerFactory) {
+        if (keyHex == null) {
+            logger.debug("Bootstrap Sensitive Key not configured");
+        } else {
+            final Class<? extends SensitivePropertyProviderFactory> factoryClass = providerFactory.getClass();
+            try {
+                // Set Bootstrap Key using reflection to preserve ClassLoader isolation
+                final Method setMethod = factoryClass.getMethod(SET_KEY_METHOD, String.class);
+                setMethod.invoke(providerFactory, keyHex);
+            } catch (final NoSuchMethodException e) {
+                logger.warn("Method [{}] on Class [{}] not found", SET_KEY_METHOD, factoryClass.getName());
+            } catch (final IllegalAccessException e) {
+                logger.warn("Method [{}] on Class [{}] access not allowed", SET_KEY_METHOD, factoryClass.getName());
+            } catch (final InvocationTargetException e) {
+                throw new SensitivePropertyProtectionException("Set Bootstrap Key on Provider Factory failed", e);
+            }
+        }
+    }
+
+    private static class DuplicateDetectingProperties extends Properties {
+        // Only need to retain Properties key. This will help prevent possible inadvertent exposure of sensitive Properties value
+        private final Set<String> duplicateKeys = new HashSet<>();  // duplicate key with different values
+        private final Set<String> redundantKeys = new HashSet<>();  // duplicate key with same value
+        public DuplicateDetectingProperties() {
+            super();
+        }
+
+        public Set<String> duplicateKeySet() {
+            return duplicateKeys;
+        }
+
+        public Set<String> redundantKeySet() {
+            return redundantKeys;
+        }
+
+        @Override
+        public Object put(Object key, Object value) {
+            Object existingValue = super.put(key, value);
+            if (existingValue != null) {
+                if (existingValue.toString().equals(value.toString())) {
+                    redundantKeys.add(key.toString());
+                    return existingValue;
+                } else {
+                    duplicateKeys.add(key.toString());
+                }
+            }
+            return value;
+        }
     }
 }

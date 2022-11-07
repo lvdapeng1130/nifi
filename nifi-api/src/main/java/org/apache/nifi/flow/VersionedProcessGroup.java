@@ -24,7 +24,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-public class VersionedProcessGroup extends VersionedComponent {
+public class  VersionedProcessGroup extends VersionedComponent {
 
     private Set<VersionedProcessGroup> processGroups = new HashSet<>();
     private Set<VersionedRemoteProcessGroup> remoteProcessGroups = new HashSet<>();
@@ -46,6 +46,7 @@ public class VersionedProcessGroup extends VersionedComponent {
     private String defaultFlowFileExpiration;
     private Long defaultBackPressureObjectThreshold;
     private String defaultBackPressureDataSizeThreshold;
+
 
     @ApiModelProperty("The child Process Groups")
     public Set<VersionedProcessGroup> getProcessGroups() {

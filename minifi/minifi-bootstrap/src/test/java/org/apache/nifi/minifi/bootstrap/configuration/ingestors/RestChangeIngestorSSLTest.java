@@ -17,15 +17,16 @@
 
 package org.apache.nifi.minifi.bootstrap.configuration.ingestors;
 
-
+import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.OkHttpClient;
 import org.apache.nifi.minifi.bootstrap.ConfigurationFileHolder;
 import org.apache.nifi.minifi.bootstrap.configuration.ConfigurationChangeListener;
 import org.apache.nifi.minifi.bootstrap.configuration.ConfigurationChangeNotifier;
 import org.apache.nifi.minifi.bootstrap.configuration.ListenerHandleResult;
 import org.apache.nifi.minifi.bootstrap.configuration.ingestors.common.RestChangeIngestorCommonTest;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.mockito.Mockito;
 
 import javax.net.ssl.KeyManagerFactory;
@@ -45,13 +46,12 @@ import java.security.cert.CertificateException;
 import java.util.Collections;
 import java.util.Properties;
 
+import static org.apache.nifi.minifi.bootstrap.configuration.ingestors.PullHttpChangeIngestor.PULL_HTTP_BASE_KEY;
 import static org.mockito.Mockito.when;
-
 
 public class RestChangeIngestorSSLTest extends RestChangeIngestorCommonTest {
 
-
-    @BeforeClass
+    @BeforeAll
     public static void setUpHttps() throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, UnrecoverableKeyException, KeyManagementException, InterruptedException {
         Properties properties = new Properties();
         properties.setProperty(RestChangeIngestor.TRUSTSTORE_LOCATION_KEY, "./src/test/resources/localhost-ts.jks");
@@ -61,6 +61,8 @@ public class RestChangeIngestorSSLTest extends RestChangeIngestorCommonTest {
         properties.setProperty(RestChangeIngestor.KEYSTORE_PASSWORD_KEY, "localtest");
         properties.setProperty(RestChangeIngestor.KEYSTORE_TYPE_KEY, "JKS");
         properties.setProperty(RestChangeIngestor.NEED_CLIENT_AUTH_KEY, "false");
+        properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
+        properties.put(PULL_HTTP_BASE_KEY + ".override.core", "true");
 
         restChangeIngestor = new RestChangeIngestor();
 
@@ -69,7 +71,10 @@ public class RestChangeIngestorSSLTest extends RestChangeIngestorCommonTest {
         when(testListener.getDescriptor()).thenReturn("MockChangeListener");
         when(testNotifier.notifyListeners(Mockito.any())).thenReturn(Collections.singleton(new ListenerHandleResult(testListener)));
 
-        restChangeIngestor.initialize(properties, Mockito.mock(ConfigurationFileHolder.class), testNotifier);
+        ConfigurationFileHolder configurationFileHolder = Mockito.mock(ConfigurationFileHolder.class);
+        when(configurationFileHolder.getConfigFileReference()).thenReturn(new AtomicReference<>(ByteBuffer.wrap(new byte[0])));
+
+        restChangeIngestor.initialize(properties, configurationFileHolder, testNotifier);
         restChangeIngestor.setDifferentiator(mockDifferentiator);
         restChangeIngestor.start();
 
@@ -125,26 +130,9 @@ public class RestChangeIngestorSSLTest extends RestChangeIngestorCommonTest {
         client = clientBuilder.build();
     }
 
-    @AfterClass
+    @AfterAll
     public static void stop() throws Exception {
         restChangeIngestor.close();
         client = null;
-    }
-
-    private static KeyStore readKeyStore(String path) throws KeyStoreException, IOException, CertificateException, NoSuchAlgorithmException {
-        KeyStore ks = KeyStore.getInstance("jks");
-
-        char[] password = "localtest".toCharArray();
-
-        java.io.FileInputStream fis = null;
-        try {
-            fis = new java.io.FileInputStream(path);
-            ks.load(fis, password);
-        } finally {
-            if (fis != null) {
-                fis.close();
-            }
-        }
-        return ks;
     }
 }

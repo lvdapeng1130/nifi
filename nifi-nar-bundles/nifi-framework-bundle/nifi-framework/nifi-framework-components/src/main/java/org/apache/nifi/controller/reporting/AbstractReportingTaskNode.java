@@ -23,6 +23,7 @@ import org.apache.nifi.components.ConfigVerificationResult;
 import org.apache.nifi.components.ConfigVerificationResult.Outcome;
 import org.apache.nifi.components.ConfigurableComponent;
 import org.apache.nifi.components.ValidationResult;
+import org.apache.nifi.components.validation.ValidationState;
 import org.apache.nifi.components.validation.ValidationStatus;
 import org.apache.nifi.components.validation.ValidationTrigger;
 import org.apache.nifi.controller.AbstractComponentNode;
@@ -164,17 +165,14 @@ public abstract class AbstractReportingTaskNode extends AbstractComponentNode im
     @Override
     public void setReportingTask(final LoggableComponent<ReportingTask> reportingTask) {
         if (isRunning()) {
-            throw new IllegalStateException("Cannot modify Reporting Task configuration while Reporting Task is running");
+            throw new IllegalStateException("Cannot modify configuration of " + this + " while Reporting Task is running");
         }
         this.reportingTaskRef.set(new ReportingTaskDetails(reportingTask));
     }
 
     @Override
     public void reload(final Set<URL> additionalUrls) throws ReportingTaskInstantiationException {
-        if (isRunning()) {
-            throw new IllegalStateException("Cannot reload Reporting Task while Reporting Task is running");
-        }
-        String additionalResourcesFingerprint = ClassLoaderUtils.generateAdditionalUrlsFingerprint(additionalUrls);
+        final String additionalResourcesFingerprint = ClassLoaderUtils.generateAdditionalUrlsFingerprint(additionalUrls, determineClasloaderIsolationKey());
         setAdditionalResourcesFingerprint(additionalResourcesFingerprint);
         getReloadComponent().reload(this, getCanonicalClassName(), getBundleCoordinate(), additionalUrls);
     }
@@ -202,7 +200,7 @@ public abstract class AbstractReportingTaskNode extends AbstractComponentNode im
     @Override
     public void verifyModifiable() throws IllegalStateException {
         if (isRunning()) {
-            throw new IllegalStateException("Cannot modify Reporting Task while the Reporting Task is running");
+            throw new IllegalStateException("Cannot modify " + this + " while the Reporting Task is running");
         }
     }
 
@@ -233,54 +231,52 @@ public abstract class AbstractReportingTaskNode extends AbstractComponentNode im
     @Override
     public void verifyCanDelete() {
         if (isRunning()) {
-            throw new IllegalStateException("Cannot delete " + getReportingTask().getIdentifier() + " because it is currently running");
+            throw new IllegalStateException("Cannot delete " + this + " because it is currently running");
         }
     }
 
     @Override
     public void verifyCanDisable() {
         if (isRunning()) {
-            throw new IllegalStateException("Cannot disable " + getReportingTask().getIdentifier() + " because it is currently running");
+            throw new IllegalStateException("Cannot disable " + this + " because it is currently running");
         }
 
         if (isDisabled()) {
-            throw new IllegalStateException("Cannot disable " + getReportingTask().getIdentifier() + " because it is already disabled");
+            throw new IllegalStateException("Cannot disable " + this + " because it is already disabled");
         }
     }
 
     @Override
     public void verifyCanEnable() {
         if (!isDisabled()) {
-            throw new IllegalStateException("Cannot enable " + getReportingTask().getIdentifier() + " because it is not disabled");
+            throw new IllegalStateException("Cannot enable " + this + " because it is not disabled");
         }
     }
 
     @Override
     public void verifyCanStart() {
         if (isDisabled()) {
-            throw new IllegalStateException("Cannot start " + getReportingTask().getIdentifier() + " because it is currently disabled");
+            throw new IllegalStateException("Cannot start " + this + " because it is currently disabled");
         }
 
-        if (isRunning()) {
-            throw new IllegalStateException("Cannot start " + getReportingTask().getIdentifier() + " because it is already running");
-        }
-
-        if (getValidationStatus() == ValidationStatus.INVALID) {
-            throw new IllegalStateException("Cannot start " + getReportingTask().getIdentifier() + " because it is in INVALID status");
+        final ValidationState validationState = getValidationState();
+        if (validationState.getStatus() == ValidationStatus.INVALID) {
+            throw new IllegalStateException("Cannot start " + this +
+                " because it is invalid with the following validation errors: " + validationState.getValidationErrors());
         }
     }
 
     @Override
     public void verifyCanStop() {
         if (!isRunning()) {
-            throw new IllegalStateException("Cannot stop " + getReportingTask().getIdentifier() + " because it is not running");
+            throw new IllegalStateException("Cannot stop " + this + " because it is not running");
         }
     }
 
     @Override
     public void verifyCanUpdate() {
         if (isRunning()) {
-            throw new IllegalStateException("Cannot update " + getReportingTask().getIdentifier() + " because it is currently running");
+            throw new IllegalStateException("Cannot update " + this + " because it is currently running");
         }
     }
 
@@ -293,26 +289,26 @@ public abstract class AbstractReportingTaskNode extends AbstractComponentNode im
     public void verifyCanStart(final Set<ControllerServiceNode> ignoredReferences) {
         switch (getScheduledState()) {
             case DISABLED:
-                throw new IllegalStateException(this.getIdentifier() + " cannot be started because it is disabled");
+                throw new IllegalStateException(this + " cannot be started because it is disabled");
             case RUNNING:
-                throw new IllegalStateException(this.getIdentifier() + " cannot be started because it is already running");
+                throw new IllegalStateException(this + " cannot be started because it is already running");
             case STOPPED:
                 break;
         }
         final int activeThreadCount = getActiveThreadCount();
         if (activeThreadCount > 0) {
-            throw new IllegalStateException(this.getIdentifier() + " cannot be started because it has " + activeThreadCount + " active threads already");
+            throw new IllegalStateException(this + " cannot be started because it has " + activeThreadCount + " active threads already");
         }
 
         final Collection<ValidationResult> validationResults = getValidationErrors(ignoredReferences);
         if (!validationResults.isEmpty()) {
-            throw new IllegalStateException(this.getIdentifier() + " cannot be started because it is not currently valid");
+            throw new IllegalStateException(this + " cannot be started because it is not currently valid");
         }
     }
 
     @Override
     public String toString() {
-        return "ReportingTask[id=" + getIdentifier() + "]";
+        return "ReportingTask[id=" + getIdentifier() + ", name=" + getName() + "]";
     }
 
     @Override
@@ -328,7 +324,7 @@ public abstract class AbstractReportingTaskNode extends AbstractComponentNode im
     @Override
     public void verifyCanPerformVerification() {
         if (isRunning()) {
-            throw new IllegalStateException("Cannot perform verification because Reporting Task is not fully stopped");
+            throw new IllegalStateException("Cannot perform verification of " + this + " because Reporting Task is not fully stopped");
         }
     }
 
@@ -363,8 +359,10 @@ public abstract class AbstractReportingTaskNode extends AbstractComponentNode im
                     final Bundle bundle = extensionManager.getBundle(getBundleCoordinate());
                     final Set<URL> classpathUrls = getAdditionalClasspathResources(context.getProperties().keySet(), descriptor -> context.getProperty(descriptor).getValue());
 
+                    final String classloaderIsolationKey = getClassLoaderIsolationKey(context);
                     final ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
-                    try (final InstanceClassLoader detectedClassLoader = extensionManager.createInstanceClassLoader(getComponentType(), getIdentifier(), bundle, classpathUrls, false)) {
+                    try (final InstanceClassLoader detectedClassLoader = extensionManager.createInstanceClassLoader(getComponentType(), getIdentifier(), bundle, classpathUrls, false,
+                                    classloaderIsolationKey)) {
                         Thread.currentThread().setContextClassLoader(detectedClassLoader);
                         results.addAll(verifiable.verify(context, logger));
                     } finally {

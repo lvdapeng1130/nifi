@@ -23,7 +23,6 @@
     </parent>
 
     <artifactId>nifi-hazelcast-services</artifactId>
-    <version>1.18.0</version>
     <packaging>jar</packaging>
 
     <dependencies>
@@ -52,7 +51,7 @@
         <dependency>
             <groupId>com.hazelcast</groupId>
             <artifactId>hazelcast</artifactId>
-            <version>4.2</version>
+            <version>4.2.5</version>
         </dependency>
 
         <!-- Test dependencies -->

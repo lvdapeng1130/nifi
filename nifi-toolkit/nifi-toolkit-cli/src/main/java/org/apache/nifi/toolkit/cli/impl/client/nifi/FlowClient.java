@@ -21,7 +21,9 @@ import org.apache.nifi.web.api.entity.ClusteSummaryEntity;
 import org.apache.nifi.web.api.entity.ConnectionStatusEntity;
 import org.apache.nifi.web.api.entity.ControllerServicesEntity;
 import org.apache.nifi.web.api.entity.CurrentUserEntity;
+import org.apache.nifi.web.api.entity.ParameterProvidersEntity;
 import org.apache.nifi.web.api.entity.ProcessGroupFlowEntity;
+import org.apache.nifi.web.api.entity.ProcessGroupStatusEntity;
 import org.apache.nifi.web.api.entity.ReportingTasksEntity;
 import org.apache.nifi.web.api.entity.ScheduleComponentsEntity;
 import org.apache.nifi.web.api.entity.TemplatesEntity;
@@ -122,6 +124,13 @@ public interface FlowClient {
     ReportingTasksEntity getReportingTasks() throws NiFiClientException, IOException;
 
     /**
+     * Retrieves the parameter providers.
+     *
+     * @return the parameter providers entity
+     */
+    ParameterProvidersEntity getParamProviders() throws NiFiClientException, IOException;
+
+    /**
      * Retrieves the all templates.
      *
      * @return the templates entity
@@ -135,4 +144,12 @@ public interface FlowClient {
      * @return the status for the connection
      */
     ConnectionStatusEntity getConnectionStatus(String connectionId, boolean nodewise) throws NiFiClientException, IOException;
+
+    /**
+     * Retrieves the status for the process group with the given ID
+     * @param groupId the id of the process group
+     * @param recursive whether or not to recurse into sub groups
+     * @return the status for the process group
+     */
+    ProcessGroupStatusEntity getProcessGroupStatus(String groupId, boolean recursive) throws NiFiClientException, IOException;
 }

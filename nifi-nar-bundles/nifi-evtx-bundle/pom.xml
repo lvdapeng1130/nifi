@@ -25,7 +25,6 @@
         <version>1.18.0</version>
     </parent>
 
-    <groupId>org.apache.nifi</groupId>
     <artifactId>nifi-evtx-bundle</artifactId>
     <packaging>pom</packaging>
 
@@ -47,5 +46,4 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
 </project>

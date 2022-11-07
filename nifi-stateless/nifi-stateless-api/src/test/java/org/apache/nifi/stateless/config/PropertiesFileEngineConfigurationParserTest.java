@@ -31,7 +31,7 @@ import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Properties;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -113,6 +113,31 @@ public class PropertiesFileEngineConfigurationParserTest {
         assertNotNull(readOnlyExtensionsDirs);
         assertEquals(0, readOnlyExtensionsDirs.size());
     }
+
+    @Test
+    public void testStatusTaskSchedule() throws IOException, StatelessConfigurationException {
+        final Properties properties = getRequiredProperties();
+        properties.setProperty("nifi.stateless.status.task.interval", "15 secs");
+        final File propertiesFile = getPropertiesFile(properties);
+
+        final StatelessEngineConfiguration configuration = parser.parseEngineConfiguration(propertiesFile);
+        assertNotNull(configuration);
+        final String statusTaskInterval = configuration.getStatusTaskInterval();
+        assertEquals("15 secs", statusTaskInterval);
+    }
+
+    @Test
+    public void testStatusTaskScheduleEmpty() throws IOException, StatelessConfigurationException {
+        final Properties properties = getRequiredProperties();
+        properties.setProperty("nifi.stateless.status.task.interval", "");
+        final File propertiesFile = getPropertiesFile(properties);
+
+        final StatelessEngineConfiguration configuration = parser.parseEngineConfiguration(propertiesFile);
+        assertNotNull(configuration);
+        final String statusTaskInterval = configuration.getStatusTaskInterval();
+        assertEquals("", statusTaskInterval);
+    }
+
 
     private Properties getRequiredProperties() {
         final Properties properties = new Properties();

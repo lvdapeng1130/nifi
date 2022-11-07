@@ -56,11 +56,6 @@ language governing permissions and limitations under the License. -->
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-processor-utils</artifactId>
-            <version>1.18.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-standard-utils</artifactId>
             <version>1.18.0</version>
         </dependency>
@@ -145,7 +140,8 @@ language governing permissions and limitations under the License. -->
                                     <directory>${frontend.working.dir}/node_modules</directory>
                                     <filtering>false</filtering>
                                     <includes>
-                                        <include>**/*</include>
+                                        <include>**/*.js</include>
+                                        <include>**/*.css</include>
                                     </includes>
                                 </resource>
                             </resources>

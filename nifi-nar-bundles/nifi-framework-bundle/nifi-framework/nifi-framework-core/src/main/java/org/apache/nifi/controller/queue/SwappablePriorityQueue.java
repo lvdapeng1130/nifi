@@ -23,6 +23,7 @@ import org.apache.nifi.controller.repository.IncompleteSwapFileException;
 import org.apache.nifi.controller.repository.SwapContents;
 import org.apache.nifi.controller.repository.SwapSummary;
 import org.apache.nifi.controller.repository.claim.ResourceClaim;
+import org.apache.nifi.controller.status.FlowFileAvailability;
 import org.apache.nifi.controller.swap.StandardSwapSummary;
 import org.apache.nifi.events.EventReporter;
 import org.apache.nifi.flowfile.FlowFile;
@@ -440,15 +441,74 @@ public class SwappablePriorityQueue {
         return queueSize.getActiveCount() == 0 && queueSize.getSwappedCount() == 0;
     }
 
+    public FlowFileAvailability getFlowFileAvailability() {
+        // If queue is empty, avoid obtaining a lock.
+        final FlowFileQueueSize queueSize = getFlowFileQueueSize();
+        if (queueSize.getActiveCount() == 0 && queueSize.getSwappedCount() == 0) {
+            return FlowFileAvailability.ACTIVE_QUEUE_EMPTY;
+        }
+
+        boolean mustMigrateSwapToActive = false;
+        FlowFileRecord top;
+        readLock.lock();
+        try {
+            top = activeQueue.peek();
+            if (top == null) {
+                if (swapQueue.isEmpty() && queueSize.getSwapFileCount() > 0) {
+                    // Nothing available in the active queue or swap queue, but there is data swapped out.
+                    // We need to trigger that data to be swapped back in. But to do this, we need to hold the write lock.
+                    // Because we cannot obtain the write lock while already holding the read lock, we set a flag so that we
+                    // can migrate swap to active queue only after we've released the read lock.
+                    mustMigrateSwapToActive = true;
+                } else if (swapQueue.isEmpty()) {
+                    return FlowFileAvailability.ACTIVE_QUEUE_EMPTY;
+                } else {
+                    top = swapQueue.get(0);
+                }
+            }
+        } finally {
+            readLock.unlock("isFlowFileAvailable");
+        }
+
+        // If we need to migrate swapped data to the active queue, we can do that now that the read lock has been released.
+        // There may well be multiple threads attempting this concurrently, though, so only use tryLock() and if the lock
+        // is not obtained, the other thread can swap data in, or the next iteration of #getFlowFileAvailability will.
+        if (mustMigrateSwapToActive) {
+            final boolean lockObtained = writeLock.tryLock();
+            if (lockObtained) {
+                try {
+                    migrateSwapToActive();
+                } finally {
+                    writeLock.unlock("getFlowFileAvailability");
+                }
+            }
+        }
+
+        if (top == null) {
+            return FlowFileAvailability.ACTIVE_QUEUE_EMPTY;
+        }
+
+        if (top.isPenalized()) {
+            return FlowFileAvailability.HEAD_OF_QUEUE_PENALIZED;
+        }
+
+        return FlowFileAvailability.FLOWFILE_AVAILABLE;
+    }
+
     public void acknowledge(final FlowFileRecord flowFile) {
         logger.trace("{} Acknowledging {}", this, flowFile);
-        incrementUnacknowledgedQueueSize(-1, -flowFile.getSize());
+        directlyIncrementUnacknowledgedQueueSize(-1, -flowFile.getSize());
     }
 
     public void acknowledge(final Collection<FlowFileRecord> flowFiles) {
-        logger.trace("{} Acknowledging {}", this, flowFiles);
+        if (logger.isTraceEnabled()) {
+            for (final FlowFileRecord flowFile : flowFiles) {
+                logger.trace("{} Acknowledging {}", this, flowFile);
+            }
+        }
+
         final long totalSize = flowFiles.stream().mapToLong(FlowFileRecord::getSize).sum();
-        incrementUnacknowledgedQueueSize(-flowFiles.size(), -totalSize);
+        directlyIncrementUnacknowledgedQueueSize(-flowFiles.size(), -totalSize);
     }
 
 
@@ -510,7 +570,7 @@ public class SwappablePriorityQueue {
 
             if (flowFile != null) {
                 logger.trace("{} poll() returning {}", this, flowFile);
-                incrementUnacknowledgedQueueSize(1, flowFile.getSize());
+                unacknowledge(1, flowFile.getSize());
             }
 
             return flowFile;
@@ -544,10 +604,6 @@ public class SwappablePriorityQueue {
                 flowFile = null;
                 break;
             }
-
-            if (flowFile != null) {
-                incrementActiveQueueSize(-1, -flowFile.getSize());
-            }
         } while (isExpired);
 
         if (!expiredRecords.isEmpty()) {
@@ -572,8 +628,10 @@ public class SwappablePriorityQueue {
             writeLock.unlock("poll(int, Set)");
         }
 
-        if (!records.isEmpty()) {
-            logger.trace("{} poll() returning {}", this, records);
+        if (!records.isEmpty() && logger.isTraceEnabled()) {
+            for (final FlowFileRecord flowFile : records) {
+                logger.trace("{} poll() returning {}", this, flowFile);
+            }
         }
 
         return records;
@@ -586,6 +644,8 @@ public class SwappablePriorityQueue {
     public List<FlowFileRecord> poll(final FlowFileFilter filter, final Set<FlowFileRecord> expiredRecords, final long expirationMillis, final PollStrategy pollStrategy) {
         long bytesPulled = 0L;
         int flowFilesPulled = 0;
+        long bytesExpired = 0L;
+        int flowFilesExpired = 0;
 
         writeLock.lock();
         try {
@@ -603,8 +663,8 @@ public class SwappablePriorityQueue {
                 final boolean isExpired = isExpired(flowFile, expirationMillis);
                 if (isExpired) {
                     expiredRecords.add(flowFile);
-                    bytesPulled += flowFile.getSize();
-                    flowFilesPulled++;
+                    bytesExpired += flowFile.getSize();
+                    flowFilesExpired++;
 
                     if (expiredRecords.size() >= MAX_EXPIRED_RECORDS_PER_ITERATION) {
                         break;
@@ -621,7 +681,6 @@ public class SwappablePriorityQueue {
                     bytesPulled += flowFile.getSize();
                     flowFilesPulled++;
 
-                    incrementUnacknowledgedQueueSize(1, flowFile.getSize());
                     selectedFlowFiles.add(flowFile);
                 } else {
                     unselected.add(flowFile);
@@ -633,10 +692,16 @@ public class SwappablePriorityQueue {
             }
 
             this.activeQueue.addAll(unselected);
-            incrementActiveQueueSize(-flowFilesPulled, -bytesPulled);
+            unacknowledge(flowFilesPulled, bytesPulled);
 
-            if (!selectedFlowFiles.isEmpty()) {
-                logger.trace("{} poll() returning {}", this, selectedFlowFiles);
+            if (flowFilesExpired > 0) {
+                incrementActiveQueueSize(-flowFilesExpired, -bytesExpired);
+            }
+
+            if (!selectedFlowFiles.isEmpty() && logger.isTraceEnabled()) {
+                for (final FlowFileRecord flowFile : selectedFlowFiles) {
+                    logger.trace("{} poll() returning {}", this, flowFile);
+                }
             }
 
             return selectedFlowFiles;
@@ -655,8 +720,10 @@ public class SwappablePriorityQueue {
             expiredBytes += record.getSize();
         }
 
-        incrementActiveQueueSize(-(expiredRecords.size() + records.size()), -bytesDrained);
-        incrementUnacknowledgedQueueSize(records.size(), bytesDrained - expiredBytes);
+        unacknowledge(records.size(), bytesDrained);
+        if (!expiredRecords.isEmpty()) {
+            incrementActiveQueueSize(-expiredRecords.size(), -expiredBytes);
+        }
     }
 
 
@@ -1031,7 +1098,32 @@ public class SwappablePriorityQueue {
         }
     }
 
-    private void incrementUnacknowledgedQueueSize(final int count, final long bytes) {
+    /**
+     * Increments the unacknowledged queue size and decrements the active queue size by the given values.
+     * This logic is extracted into a separate method because it is critical that we always increment the unacknowledged queue size
+     * before decrementing the active queue size. Failure to do so could result in the queue temporarily reporting a size of 0/empty
+     * when the queue is not empty (because we could decrement active queue size to 0 before incrementing unacknowledged queue size to 1).
+     * To help ensure that we don't break that ordering, we encapsulate the logic into a single method that is responsible for performing
+     * these steps, and we also used the name 'directlyIncrementUnacknowledgedQueueSize' for the method that updates the unacknowledged queue size, rather than simply
+     * 'incrementUnacknowledgedQueueSize' to give a hint to any callers that caution must be taken when calling the method.
+     *
+     * @param count the number of FlowFiles to increase the unacknowledged count by and decrement active count by
+     * @param bytes the bytes to increase the unacknowledged count by and decrement the active count by
+     */
+    private void unacknowledge(final int count, final long bytes) {
+        directlyIncrementUnacknowledgedQueueSize(count, bytes);
+        incrementActiveQueueSize(-count, -bytes);
+    }
+
+    /**
+     * Increments the Unacknowledged Queue Size by the given arguments. Note that when data is polled, we need to both increment the unacknowledged size
+     * AND decrement the active size. But it is crucial that we perform these actions in the proper order. The Unacknowledged size must be incremented before
+     * the active queue size is decremented. For this purpose, use {@link #unacknowledge(int, long)} instead of using this method directly.
+     *
+     * @param count the number of FlowFiles to increase the unacknowledged count by and decrement active count by
+     * @param bytes the bytes to increase the unacknowledged count by and decrement the active count by
+     */
+    private void directlyIncrementUnacknowledgedQueueSize(final int count, final long bytes) {
         boolean updated = false;
         while (!updated) {
             final FlowFileQueueSize original = size.get();

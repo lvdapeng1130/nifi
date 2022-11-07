@@ -26,7 +26,7 @@ limitations under the License.
     <packaging>pom</packaging>
     <description>This is the assembly of Apache MiNiFi's - Command And Control Server</description>
     <properties>
-        <minifi.c2.server.port>10080</minifi.c2.server.port>
+        <minifi.c2.server.port>10090</minifi.c2.server.port>
 
         <minifi.c2.server.secure>false</minifi.c2.server.secure>
         <minifi.c2.server.keystore>./conf/keystore.jks</minifi.c2.server.keystore>
@@ -64,6 +64,7 @@ limitations under the License.
                                 <descriptor>src/main/assembly/dependencies.xml</descriptor>
                             </descriptors>
                             <tarLongFileMode>posix</tarLongFileMode>
+                            <formats>zip</formats>
                             <escapeString>\</escapeString>
                         </configuration>
                     </execution>
@@ -139,23 +140,19 @@ limitations under the License.
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.ext</groupId>
-            <artifactId>jersey-spring4</artifactId>
-            <version>${jersey.version}</version>
+            <artifactId>jersey-spring5</artifactId>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.containers</groupId>
             <artifactId>jersey-container-jetty-http</artifactId>
-            <version>${jersey.version}</version>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.containers</groupId>
             <artifactId>jersey-container-servlet</artifactId>
-            <version>${jersey.version}</version>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.core</groupId>
             <artifactId>jersey-client</artifactId>
-            <version>${jersey.version}</version>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -184,4 +181,45 @@ limitations under the License.
             <type>war</type>
         </dependency>
     </dependencies>
+    <profiles>
+        <profile>
+        <id>targz</id>
+        <activation>
+            <activeByDefault>false</activeByDefault>
+        </activation>
+        <build>
+            <plugins>
+                <plugin>
+                    <artifactId>maven-assembly-plugin</artifactId>
+                    <configuration>
+                        <finalName>minifi-c2-${project.version}</finalName>
+                        <attach>false</attach>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>make shared resource</id>
+                            <goals>
+                                <goal>single</goal>
+                            </goals>
+                            <phase>package</phase>
+                            <configuration>
+                                <archiverConfig>
+                                    <defaultDirectoryMode>0755</defaultDirectoryMode>
+                                    <directoryMode>0755</directoryMode>
+                                    <fileMode>0644</fileMode>
+                                </archiverConfig>
+                                <descriptors>
+                                    <descriptor>src/main/assembly/dependencies.xml</descriptor>
+                                </descriptors>
+                                <tarLongFileMode>posix</tarLongFileMode>
+                                <formats>tar.gz</formats>
+                                <escapeString>\</escapeString>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </build>
+        </profile>
+    </profiles>
 </project>

@@ -16,19 +16,18 @@
  */
 package org.apache.nifi.processors;
 
+import com.maxmind.geoip2.DatabaseReader;
 import com.maxmind.geoip2.model.CityResponse;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processor.ProcessContext;
-import org.apache.nifi.processors.maxmind.DatabaseReader;
 import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -40,26 +39,21 @@ import java.util.Map;
 
 import static org.apache.nifi.processors.GeoEnrichTestUtils.getFullCityResponse;
 import static org.apache.nifi.processors.GeoEnrichTestUtils.getNullLatAndLongCityResponse;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({GeoEnrichIP.class})
-@SuppressWarnings("WeakerAccess")
 public class TestGeoEnrichIP {
     DatabaseReader databaseReader;
     GeoEnrichIP geoEnrichIP;
     TestRunner testRunner;
 
-    @Before
-    public void setUp() throws Exception {
-        mockStatic(InetAddress.class);
+    @BeforeEach
+    public void setUp() {
         databaseReader = mock(DatabaseReader.class);
         geoEnrichIP = new TestableGeoEnrichIP();
         testRunner = TestRunners.newTestRunner(geoEnrichIP);
@@ -213,7 +207,6 @@ public class TestGeoEnrichIP {
         assertEquals(0, found.size());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldFlowToNotFoundWhenIOExceptionThrownFromMaxMind() throws Exception {
         testRunner.setProperty(GeoEnrichIP.GEO_DATABASE_FILE, "./");
@@ -235,7 +228,6 @@ public class TestGeoEnrichIP {
         assertEquals(0, found.size());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void shouldFlowToNotFoundWhenExceptionThrownFromMaxMind() throws Exception {
         testRunner.setProperty(GeoEnrichIP.GEO_DATABASE_FILE, "./");
@@ -257,20 +249,22 @@ public class TestGeoEnrichIP {
         assertEquals(0, found.size());
     }
 
-    @SuppressWarnings("unchecked")
     @Test
     public void whenInetAddressThrowsUnknownHostFlowFileShouldBeSentToNotFound() throws Exception {
         testRunner.setProperty(GeoEnrichIP.GEO_DATABASE_FILE, "./");
         testRunner.setProperty(GeoEnrichIP.IP_ADDRESS_ATTRIBUTE, "ip");
 
         final Map<String, String> attributes = new HashMap<>();
-        attributes.put("ip", "somenonexistentdomain.comm");
-
-        when(InetAddress.getByName("somenonexistentdomain.comm")).thenThrow(UnknownHostException.class);
+        final String domainBad = "somenonexistentdomain.comm";
+        attributes.put("ip", domainBad);
 
         testRunner.enqueue(new byte[0], attributes);
 
-        testRunner.run();
+        try (final MockedStatic<InetAddress> mockedInetAddress = Mockito.mockStatic(InetAddress.class)) {
+            mockedInetAddress.when(() -> InetAddress.getByName(domainBad))
+                    .thenThrow(new UnknownHostException(domainBad));
+            testRunner.run();
+        }
 
         List<MockFlowFile> notFound = testRunner.getFlowFilesForRelationship(GeoEnrichIP.REL_NOT_FOUND);
         List<MockFlowFile> found = testRunner.getFlowFilesForRelationship(GeoEnrichIP.REL_FOUND);
@@ -285,7 +279,7 @@ public class TestGeoEnrichIP {
     class TestableGeoEnrichIP extends GeoEnrichIP {
         @OnScheduled
         @Override
-        public void onScheduled(ProcessContext context) throws IOException {
+        public void onScheduled(ProcessContext context) {
             databaseReaderRef.set(databaseReader);
         }
     }

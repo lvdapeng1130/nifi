@@ -17,25 +17,17 @@
 
 package org.apache.nifi.processors.gcp.bigquery;
 
-import java.io.InputStream;
-import java.sql.Date;
-import java.sql.Time;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.ArrayList;
-
+import com.google.cloud.bigquery.BigQueryError;
+import com.google.cloud.bigquery.InsertAllRequest;
+import com.google.cloud.bigquery.InsertAllResponse;
+import com.google.cloud.bigquery.TableId;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.SystemResource;
 import org.apache.nifi.annotation.behavior.SystemResourceConsideration;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
 import org.apache.nifi.annotation.behavior.WritesAttributes;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
+import org.apache.nifi.annotation.documentation.DeprecationNotice;
 import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
@@ -51,13 +43,20 @@ import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
 import org.apache.nifi.serialization.record.MapRecord;
 import org.apache.nifi.serialization.record.Record;
-import org.apache.nifi.util.StringUtils;
 
-import com.google.cloud.bigquery.BigQueryError;
-import com.google.cloud.bigquery.InsertAllRequest;
-import com.google.cloud.bigquery.InsertAllResponse;
-import com.google.cloud.bigquery.TableId;
-import com.google.common.collect.ImmutableList;
+import java.io.InputStream;
+import java.sql.Date;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A processor for streaming loading data into a Google BigQuery table. It uses the BigQuery
@@ -69,10 +68,14 @@ import com.google.common.collect.ImmutableList;
  * output table to periodically clean these rare duplicates. Alternatively, using the Batch insert
  * method does guarantee no duplicates, though the latency for the insert into BigQuery will be much
  * higher.
+ *
+ * @deprecated use {@link PutBigQuery} instead which uses the Write API
  */
 @InputRequirement(InputRequirement.Requirement.INPUT_REQUIRED)
+@DeprecationNotice(alternatives = {PutBigQuery.class}, reason = "This processor is deprecated and may be removed in future releases.")
 @Tags({ "google", "google cloud", "bq", "gcp", "bigquery", "record" })
-@CapabilityDescription("Load data into Google BigQuery table using the streaming API. This processor "
+@CapabilityDescription("Please be aware this processor is deprecated and may be removed in the near future. Use PutBigQuery instead. "
+        + "Load data into Google BigQuery table using the streaming API. This processor "
         + "is not intended to load large flow files as it will load the full content into memory. If "
         + "you need to insert large flow files, consider using PutBigQueryBatch instead.")
 @SeeAlso({ PutBigQueryBatch.class })
@@ -80,7 +83,11 @@ import com.google.common.collect.ImmutableList;
 @WritesAttributes({
         @WritesAttribute(attribute = BigQueryAttributes.JOB_NB_RECORDS_ATTR, description = BigQueryAttributes.JOB_NB_RECORDS_DESC)
 })
+@Deprecated
 public class PutBigQueryStreaming extends AbstractBigQueryProcessor {
+
+    private static final DateTimeFormatter timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+    private static final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSSSSS");
 
     public static final PropertyDescriptor RECORD_READER = new PropertyDescriptor.Builder()
             .name(BigQueryAttributes.RECORD_READER_ATTR)
@@ -100,16 +107,12 @@ public class PutBigQueryStreaming extends AbstractBigQueryProcessor {
             .defaultValue("false")
             .build();
 
-    private static final DateTimeFormatter timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
-    private static final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSSSSS");
-
     @Override
     public List<PropertyDescriptor> getSupportedPropertyDescriptors() {
-        return ImmutableList.<PropertyDescriptor> builder()
-                .addAll(super.getSupportedPropertyDescriptors())
-                .add(RECORD_READER)
-                .add(SKIP_INVALID_ROWS)
-                .build();
+        final List<PropertyDescriptor> descriptors = new ArrayList<>(super.getSupportedPropertyDescriptors());
+        descriptors.add(RECORD_READER);
+        descriptors.add(SKIP_INVALID_ROWS);
+        return Collections.unmodifiableList(descriptors);
     }
 
     @Override
@@ -124,17 +127,8 @@ public class PutBigQueryStreaming extends AbstractBigQueryProcessor {
         if (flowFile == null) {
             return;
         }
-
-        final String projectId = context.getProperty(PROJECT_ID).evaluateAttributeExpressions().getValue();
-        final String dataset = context.getProperty(DATASET).evaluateAttributeExpressions(flowFile).getValue();
         final String tableName = context.getProperty(TABLE_NAME).evaluateAttributeExpressions(flowFile).getValue();
-
-        final TableId tableId;
-        if (StringUtils.isEmpty(projectId)) {
-            tableId = TableId.of(dataset, tableName);
-        } else {
-            tableId = TableId.of(projectId, dataset, tableName);
-        }
+        final TableId tableId = getTableId(context, flowFile.getAttributes());
 
         try {
 
@@ -143,7 +137,7 @@ public class PutBigQueryStreaming extends AbstractBigQueryProcessor {
 
             try (final InputStream in = session.read(flowFile)) {
                 final RecordReaderFactory readerFactory = context.getProperty(RECORD_READER).asControllerService(RecordReaderFactory.class);
-                try (final RecordReader reader = readerFactory.createRecordReader(flowFile, in, getLogger());) {
+                try (final RecordReader reader = readerFactory.createRecordReader(flowFile, in, getLogger())) {
                     Record currentRecord;
                     while ((currentRecord = reader.nextRecord()) != null) {
                         request.addRow(convertMapRecord(currentRecord.toMap()));
@@ -194,8 +188,8 @@ public class PutBigQueryStreaming extends AbstractBigQueryProcessor {
             if (obj instanceof MapRecord) {
                 result.put(key, convertMapRecord(((MapRecord) obj).toMap()));
             } else if (obj instanceof Object[]
-                    && ((Object[]) obj).length > 0
-                    && ((Object[]) obj)[0] instanceof MapRecord) {
+                && ((Object[]) obj).length > 0
+                && ((Object[]) obj)[0] instanceof MapRecord) {
                 List<Map<String, Object>> lmapr = new ArrayList<Map<String, Object>>();
                 for (Object mapr : ((Object[]) obj)) {
                     lmapr.add(convertMapRecord(((MapRecord) mapr).toMap()));
@@ -210,7 +204,7 @@ public class PutBigQueryStreaming extends AbstractBigQueryProcessor {
                 // ZoneOffset.UTC time zone is necessary due to implicit time zone conversion in Record Readers from
                 // the local system time zone to the GMT time zone
                 LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(((Time) obj).getTime()), ZoneOffset.UTC);
-                result.put(key, dateTime.format(timeFormatter) );
+                result.put(key, dateTime.format(timeFormatter));
             } else if (obj instanceof Date) {
                 result.put(key, obj.toString());
             } else {

@@ -16,8 +16,6 @@
  */
 package org.apache.nifi.web;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.apache.nifi.action.Component;
 import org.apache.nifi.action.FlowChangeAction;
 import org.apache.nifi.action.Operation;
@@ -36,17 +34,20 @@ import org.apache.nifi.authorization.user.NiFiUserDetails;
 import org.apache.nifi.authorization.user.StandardNiFiUser.Builder;
 import org.apache.nifi.controller.FlowController;
 import org.apache.nifi.controller.flow.FlowManager;
+import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
+import org.apache.nifi.flow.ExternalControllerServiceReference;
+import org.apache.nifi.flow.ParameterProviderReference;
+import org.apache.nifi.flow.VersionedControllerService;
+import org.apache.nifi.flow.VersionedParameterContext;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.groups.RemoteProcessGroup;
 import org.apache.nifi.history.History;
 import org.apache.nifi.history.HistoryQuery;
 import org.apache.nifi.nar.ExtensionManager;
-import org.apache.nifi.registry.flow.ExternalControllerServiceReference;
-import org.apache.nifi.registry.flow.RestBasedFlowRegistry;
+import org.apache.nifi.registry.flow.FlowRegistryUtil;
+import org.apache.nifi.registry.flow.RegisteredFlowSnapshot;
 import org.apache.nifi.registry.flow.VersionControlInformation;
-import org.apache.nifi.registry.flow.VersionedFlowSnapshot;
-import org.apache.nifi.registry.flow.VersionedParameterContext;
 import org.apache.nifi.registry.flow.mapping.InstantiatedVersionedProcessGroup;
 import org.apache.nifi.registry.flow.mapping.NiFiRegistryFlowMapper;
 import org.apache.nifi.web.api.dto.DtoFactory;
@@ -71,9 +72,14 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -83,9 +89,13 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyMap;
+import static org.mockito.Mockito.anySet;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -356,28 +366,85 @@ public class StandardNiFiServiceFacadeTest {
         final InstantiatedVersionedProcessGroup nonVersionedProcessGroup = mock(InstantiatedVersionedProcessGroup.class);
         when(flowMapper.mapNonVersionedProcessGroup(processGroup, controllerServiceProvider)).thenReturn(nonVersionedProcessGroup);
 
+        final Map<String, ParameterProviderReference> parameterProviderReferences = new HashMap<>();
         final String parameterName = "foo";
         final VersionedParameterContext versionedParameterContext = mock(VersionedParameterContext.class);
         when(versionedParameterContext.getName()).thenReturn(parameterName);
-        final Map<String, VersionedParameterContext> parameterContexts = Maps.newHashMap();
+        final Map<String, VersionedParameterContext> parameterContexts = new LinkedHashMap<>();
         parameterContexts.put(parameterName, versionedParameterContext);
-        when(flowMapper.mapParameterContexts(processGroup, true)).thenReturn(parameterContexts);
+        when(flowMapper.mapParameterContexts(processGroup, true, parameterProviderReferences)).thenReturn(parameterContexts);
 
         final ExternalControllerServiceReference externalControllerServiceReference = mock(ExternalControllerServiceReference.class);
-        final Map<String, ExternalControllerServiceReference> externalControllerServiceReferences = Maps.newHashMap();
+        final Map<String, ExternalControllerServiceReference> externalControllerServiceReferences = new LinkedHashMap<>();
         externalControllerServiceReferences.put("test", externalControllerServiceReference);
         when(nonVersionedProcessGroup.getExternalControllerServiceReferences()).thenReturn(externalControllerServiceReferences);
 
-        final VersionedFlowSnapshot versionedFlowSnapshot = serviceFacadeSpy.getCurrentFlowSnapshotByGroupId(groupId);
+        final RegisteredFlowSnapshot versionedFlowSnapshot = serviceFacadeSpy.getCurrentFlowSnapshotByGroupId(groupId);
 
         assertEquals(nonVersionedProcessGroup, versionedFlowSnapshot.getFlowContents());
         assertEquals(1, versionedFlowSnapshot.getParameterContexts().size());
         assertEquals(versionedParameterContext, versionedFlowSnapshot.getParameterContexts().get(parameterName));
         assertEquals(externalControllerServiceReferences, versionedFlowSnapshot.getExternalControllerServices());
-        assertEquals(RestBasedFlowRegistry.FLOW_ENCODING_VERSION, versionedFlowSnapshot.getFlowEncodingVersion());
+        assertEquals(FlowRegistryUtil.FLOW_ENCODING_VERSION, versionedFlowSnapshot.getFlowEncodingVersion());
         assertNull(versionedFlowSnapshot.getFlow());
         assertNull(versionedFlowSnapshot.getBucket());
         assertNull(versionedFlowSnapshot.getSnapshotMetadata());
+    }
+
+    @Test
+    public void testGetCurrentFlowSnapshotByGroupIdWithReferencedControllerServices() {
+        final String groupId = UUID.randomUUID().toString();
+        final ProcessGroup processGroup = mock(ProcessGroup.class);
+        final ProcessGroup parentProcessGroup = mock(ProcessGroup.class);
+
+        final Set<ControllerServiceNode> parentControllerServices = new HashSet<>();
+        final ControllerServiceNode parentControllerService1 = mock(ControllerServiceNode.class);
+        final ControllerServiceNode parentControllerService2 = mock(ControllerServiceNode.class);
+        parentControllerServices.add(parentControllerService1);
+        parentControllerServices.add(parentControllerService2);
+
+        when(processGroupDAO.getProcessGroup(groupId)).thenReturn(processGroup);
+        when(processGroup.getParent()).thenReturn(parentProcessGroup);
+        when(parentProcessGroup.getControllerServices(anyBoolean())).thenReturn(parentControllerServices);
+
+        final FlowManager flowManager = mock(FlowManager.class);
+        final ExtensionManager extensionManager = mock(ExtensionManager.class);
+        when(flowController.getFlowManager()).thenReturn(flowManager);
+        when(flowController.getExtensionManager()).thenReturn(extensionManager);
+
+        final ControllerServiceProvider controllerServiceProvider = mock(ControllerServiceProvider.class);
+        when(flowController.getControllerServiceProvider()).thenReturn(controllerServiceProvider);
+
+        final VersionControlInformation versionControlInformation = mock(VersionControlInformation.class);
+        when(processGroup.getVersionControlInformation()).thenReturn(versionControlInformation);
+
+        // use spy to mock the make() method for generating a new flow mapper to make this testable
+        final StandardNiFiServiceFacade serviceFacadeSpy = spy(serviceFacade);
+        final NiFiRegistryFlowMapper flowMapper = mock(NiFiRegistryFlowMapper.class);
+        when(serviceFacadeSpy.makeNiFiRegistryFlowMapper(extensionManager)).thenReturn(flowMapper);
+
+        final InstantiatedVersionedProcessGroup nonVersionedProcessGroup = spy(new InstantiatedVersionedProcessGroup(UUID.randomUUID().toString(), UUID.randomUUID().toString()));
+        when(flowMapper.mapNonVersionedProcessGroup(processGroup, controllerServiceProvider)).thenReturn(nonVersionedProcessGroup);
+
+        final VersionedControllerService versionedControllerService1 = mock(VersionedControllerService.class);
+        final VersionedControllerService versionedControllerService2 = mock(VersionedControllerService.class);
+
+        Mockito.when(versionedControllerService1.getIdentifier()).thenReturn("test");
+        Mockito.when(versionedControllerService2.getIdentifier()).thenReturn("test2");
+
+        when(flowMapper.mapControllerService(same(parentControllerService1), same(controllerServiceProvider), anySet(), anyMap())).thenReturn(versionedControllerService1);
+        when(flowMapper.mapControllerService(same(parentControllerService2), same(controllerServiceProvider), anySet(), anyMap())).thenReturn(versionedControllerService2);
+        when(flowMapper.mapParameterContexts(processGroup, true, null)).thenReturn(new HashMap<>());
+
+        final ExternalControllerServiceReference externalControllerServiceReference = mock(ExternalControllerServiceReference.class);
+        final Map<String, ExternalControllerServiceReference> externalControllerServiceReferences = new LinkedHashMap<>();
+        externalControllerServiceReferences.put("test", externalControllerServiceReference);
+        when(nonVersionedProcessGroup.getExternalControllerServiceReferences()).thenReturn(externalControllerServiceReferences);
+
+        final RegisteredFlowSnapshot versionedFlowSnapshot = serviceFacadeSpy.getCurrentFlowSnapshotByGroupIdWithReferencedControllerServices(groupId);
+
+        assertEquals(1, versionedFlowSnapshot.getFlowContents().getControllerServices().size());
+        assertEquals("test", versionedFlowSnapshot.getFlowContents().getControllerServices().iterator().next().getIdentifier());
     }
 
     @Test
@@ -389,7 +456,7 @@ public class StandardNiFiServiceFacadeTest {
         when(processGroupDAO.getProcessGroup(groupId)).thenReturn(processGroup);
 
         when(processGroup.getVersionControlInformation()).thenReturn(null);
-        when(processGroup.getProcessGroups()).thenReturn(Sets.newHashSet(childProcessGroup));
+        when(processGroup.getProcessGroups()).thenReturn(Collections.singleton(childProcessGroup));
         when(childProcessGroup.getVersionControlInformation()).thenReturn(null);
 
         assertFalse(serviceFacade.isAnyProcessGroupUnderVersionControl(groupId));
@@ -404,7 +471,7 @@ public class StandardNiFiServiceFacadeTest {
 
         final VersionControlInformation vci = mock(VersionControlInformation.class);
         when(processGroup.getVersionControlInformation()).thenReturn(vci);
-        when(processGroup.getProcessGroups()).thenReturn(Sets.newHashSet());
+        when(processGroup.getProcessGroups()).thenReturn(new HashSet<>());
 
         assertTrue(serviceFacade.isAnyProcessGroupUnderVersionControl(groupId));
     }
@@ -419,7 +486,7 @@ public class StandardNiFiServiceFacadeTest {
 
         final VersionControlInformation vci = mock(VersionControlInformation.class);
         when(processGroup.getVersionControlInformation()).thenReturn(null);
-        when(processGroup.getProcessGroups()).thenReturn(Sets.newHashSet(childProcessGroup));
+        when(processGroup.getProcessGroups()).thenReturn(Collections.singleton(childProcessGroup));
         when(childProcessGroup.getVersionControlInformation()).thenReturn(vci);
 
         assertTrue(serviceFacade.isAnyProcessGroupUnderVersionControl(groupId));

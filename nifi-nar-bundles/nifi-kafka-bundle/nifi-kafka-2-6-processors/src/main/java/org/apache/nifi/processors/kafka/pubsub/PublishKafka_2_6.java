@@ -94,15 +94,16 @@ public class PublishKafka_2_6 extends AbstractProcessor implements VerifiablePro
             + "whether or not it is replicated. This is faster than <Guarantee Replicated Delivery> "
             + "but can result in data loss if a Kafka node crashes");
     static final AllowableValue DELIVERY_BEST_EFFORT = new AllowableValue("0", "Best Effort",
-        "FlowFile will be routed to success after successfully writing the content to a Kafka node, "
-            + "without waiting for a response. This provides the best performance but may result in data loss.");
+        "FlowFile will be routed to success after successfully sending the content to a Kafka node, "
+            + "without waiting for any acknowledgment from the node at all. This provides the best performance but may result in data loss.");
 
     static final AllowableValue ROUND_ROBIN_PARTITIONING = new AllowableValue(Partitioners.RoundRobinPartitioner.class.getName(),
         Partitioners.RoundRobinPartitioner.class.getSimpleName(),
         "Messages will be assigned partitions in a round-robin fashion, sending the first message to Partition 1, "
             + "the next Partition to Partition 2, and so on, wrapping as necessary.");
     static final AllowableValue RANDOM_PARTITIONING = new AllowableValue("org.apache.kafka.clients.producer.internals.DefaultPartitioner",
-        "DefaultPartitioner", "Messages will be assigned to random partitions.");
+        "DefaultPartitioner", "The default partitioning strategy will choose the sticky partition that changes when the batch is full "
+                + "(See KIP-480 for details about sticky partitioning).");
     static final AllowableValue EXPRESSION_LANGUAGE_PARTITIONING = new AllowableValue(Partitioners.ExpressionLanguagePartitioner.class.getName(), "Expression Language Partitioner",
         "Interprets the <Partition> property as Expression Language that will be evaluated against each FlowFile. This Expression will be evaluated once against the FlowFile, " +
             "so all Records in a given FlowFile will go to the same partition.");
@@ -127,7 +128,7 @@ public class PublishKafka_2_6 extends AbstractProcessor implements VerifiablePro
         .required(true)
         .expressionLanguageSupported(ExpressionLanguageScope.NONE)
         .allowableValues(DELIVERY_BEST_EFFORT, DELIVERY_ONE_NODE, DELIVERY_REPLICATED)
-        .defaultValue(DELIVERY_BEST_EFFORT.getValue())
+        .defaultValue(DELIVERY_REPLICATED.getValue())
         .build();
 
     static final PropertyDescriptor METADATA_WAIT_TIME = new PropertyDescriptor.Builder()

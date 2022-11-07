@@ -19,6 +19,7 @@ package org.apache.nifi.authorization;
 import org.apache.nifi.authorization.resource.Authorizable;
 import org.apache.nifi.components.ConfigurableComponent;
 import org.apache.nifi.components.RequiredPermission;
+import org.apache.nifi.parameter.ParameterContext;
 import org.apache.nifi.web.api.dto.BundleDTO;
 import org.apache.nifi.web.api.dto.FlowSnippetDTO;
 
@@ -192,12 +193,28 @@ public interface AuthorizableLookup {
     ComponentAuthorizable getReportingTask(String id);
 
     /**
+     * Get the authorizable ParameterProvider.
+     *
+     * @param id parameter provider id
+     * @return authorizable
+     */
+    ComponentAuthorizable getParameterProvider(String id);
+
+    /**
+     * Get the authorizable FlowRegistryClient.
+     *
+     * @param id reporting task id
+     * @return authorizable
+     */
+    ComponentAuthorizable getFlowRegistryClient(String id);
+
+    /**
      * Get the authorizable Parameter Context
      *
      * @param id the ID of the Parameter Context
      * @return authorizable
      */
-    Authorizable getParameterContext(String id);
+    ParameterContext getParameterContext(String id);
 
     /**
      * Get the authorizable for Parameter Contexts

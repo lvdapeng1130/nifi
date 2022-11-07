@@ -17,11 +17,26 @@
 
 package org.apache.nifi.minifi.bootstrap.configuration.ingestors.common;
 
+import static org.apache.nifi.minifi.bootstrap.configuration.ingestors.PullHttpChangeIngestor.PATH_KEY;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Properties;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import org.apache.nifi.minifi.bootstrap.RunMiNiFi;
 import org.apache.nifi.minifi.bootstrap.configuration.ConfigurationChangeListener;
 import org.apache.nifi.minifi.bootstrap.configuration.ConfigurationChangeNotifier;
 import org.apache.nifi.minifi.bootstrap.configuration.ListenerHandleResult;
-import org.apache.nifi.minifi.bootstrap.configuration.differentiators.interfaces.Differentiator;
+import org.apache.nifi.minifi.bootstrap.configuration.differentiators.Differentiator;
 import org.apache.nifi.minifi.bootstrap.configuration.ingestors.PullHttpChangeIngestor;
 import org.apache.nifi.minifi.bootstrap.util.ByteBufferInputStream;
 import org.apache.nifi.minifi.commons.schema.ConfigSchema;
@@ -34,29 +49,11 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.handler.AbstractHandler;
 import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.Properties;
-
-import static org.apache.nifi.minifi.bootstrap.configuration.ingestors.PullHttpChangeIngestor.PATH_KEY;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 public abstract class PullHttpChangeIngestorCommonTest {
 
@@ -82,23 +79,23 @@ public abstract class PullHttpChangeIngestorCommonTest {
         jetty.setHandler(handlerCollection);
     }
 
-    public abstract void pullHttpChangeIngestorInit(Properties properties);
+    public abstract void pullHttpChangeIngestorInit(Properties properties) throws IOException, SchemaLoaderException;
 
-    @Before
-    public void before() {
+    @BeforeEach
+    public void setListeners() {
         Mockito.reset(testNotifier);
         ConfigurationChangeListener testListener = Mockito.mock(ConfigurationChangeListener.class);
         when(testListener.getDescriptor()).thenReturn("MockChangeListener");
         Mockito.when(testNotifier.notifyListeners(Mockito.any())).thenReturn(Collections.singleton(new ListenerHandleResult(testListener)));
     }
 
-    @AfterClass
+    @AfterAll
     public static void shutdown() throws Exception {
         jetty.stop();
     }
 
     @Test
-    public void testNewUpdate() throws IOException {
+    public void testNewUpdate() throws IOException, SchemaLoaderException {
         Properties properties = new Properties();
         properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
         pullHttpChangeIngestorInit(properties);
@@ -132,7 +129,7 @@ public abstract class PullHttpChangeIngestorCommonTest {
     }
 
     @Test
-    public void testNoUpdate() throws IOException {
+    public void testNoUpdate() throws IOException, SchemaLoaderException {
         Properties properties = new Properties();
         properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
         pullHttpChangeIngestorInit(properties);
@@ -145,7 +142,7 @@ public abstract class PullHttpChangeIngestorCommonTest {
     }
 
     @Test
-    public void testUseEtag() throws IOException {
+    public void testUseEtag() throws IOException, SchemaLoaderException {
         Properties properties = new Properties();
         properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
         pullHttpChangeIngestorInit(properties);
@@ -166,7 +163,7 @@ public abstract class PullHttpChangeIngestorCommonTest {
     }
 
     @Test
-    public void testNewUpdateWithPath() throws IOException {
+    public void testNewUpdateWithPath() throws IOException, SchemaLoaderException {
         Properties properties = new Properties();
         properties.put(PATH_KEY, "/config.yml");
         properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
@@ -180,7 +177,7 @@ public abstract class PullHttpChangeIngestorCommonTest {
     }
 
     @Test
-    public void testNoUpdateWithPath() throws IOException {
+    public void testNoUpdateWithPath() throws IOException, SchemaLoaderException {
         Properties properties = new Properties();
         properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
         properties.put(PATH_KEY, "/config.yml");
@@ -194,7 +191,7 @@ public abstract class PullHttpChangeIngestorCommonTest {
     }
 
     @Test
-    public void testUseEtagWithPath() throws IOException {
+    public void testUseEtagWithPath() throws IOException, SchemaLoaderException {
         Properties properties = new Properties();
         properties.put(PullHttpChangeIngestor.OVERRIDE_SECURITY, "true");
         properties.put(PATH_KEY, "/config.yml");
@@ -226,7 +223,7 @@ public abstract class PullHttpChangeIngestorCommonTest {
 
         @Override
         public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response)
-                throws IOException, ServletException {
+                throws IOException {
 
             baseRequest.setHandled(true);
 

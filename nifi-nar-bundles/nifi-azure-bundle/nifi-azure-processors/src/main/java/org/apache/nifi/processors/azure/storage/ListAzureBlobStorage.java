@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 
 import com.microsoft.azure.storage.OperationContext;
+import com.microsoft.azure.storage.ResultContinuation;
+import com.microsoft.azure.storage.ResultSegment;
 import com.microsoft.azure.storage.StorageUri;
 import com.microsoft.azure.storage.blob.BlobListingDetails;
 import com.microsoft.azure.storage.blob.BlobProperties;
@@ -85,7 +87,7 @@ import java.util.Optional;
         "This allows the Processor to list only blobs that have been added or modified after this date the next time that the Processor is run.  State is " +
         "stored across the cluster so that this Processor can be run on Primary Node only and if a new Primary Node is selected, the new node can pick up " +
         "where the previous node left off, without duplicating the data.")
-public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
+public class ListAzureBlobStorage extends AbstractListAzureProcessor<BlobInfo> {
 
     private static final PropertyDescriptor PROP_PREFIX = new PropertyDescriptor.Builder()
             .name("prefix")
@@ -109,8 +111,12 @@ public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
             AzureStorageUtils.PROXY_CONFIGURATION_SERVICE,
             ListedEntityTracker.TRACKING_STATE_CACHE,
             ListedEntityTracker.TRACKING_TIME_WINDOW,
-            ListedEntityTracker.INITIAL_LISTING_TARGET
-            ));
+            ListedEntityTracker.INITIAL_LISTING_TARGET,
+            MIN_AGE,
+            MAX_AGE,
+            MIN_SIZE,
+            MAX_SIZE
+    ));
 
     @Override
     protected List<PropertyDescriptor> getSupportedPropertyDescriptors() {
@@ -155,9 +161,9 @@ public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
     protected boolean isListingResetNecessary(final PropertyDescriptor property) {
         // re-list if configuration changed, but not when security keys are rolled (not included in the condition)
         return PROP_PREFIX.equals(property)
-                   || AzureStorageUtils.ACCOUNT_NAME.equals(property)
-                   || AzureStorageUtils.CONTAINER.equals(property)
-                   || AzureStorageUtils.PROP_SAS_TOKEN.equals(property);
+                || AzureStorageUtils.ACCOUNT_NAME.equals(property)
+                || AzureStorageUtils.CONTAINER.equals(property)
+                || AzureStorageUtils.PROP_SAS_TOKEN.equals(property);
     }
 
     @Override
@@ -183,6 +189,8 @@ public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
         final String containerName = context.getProperty(AzureStorageUtils.CONTAINER).evaluateAttributeExpressions().getValue();
         final String prefix = Optional.ofNullable(context.getProperty(PROP_PREFIX).evaluateAttributeExpressions().getValue()).orElse("");
         final List<BlobInfo> listing = new ArrayList<>();
+        final long minimumTimestamp = minTimestamp == null ? 0 : minTimestamp;
+
         try {
             final CloudBlobClient blobClient = AzureStorageUtils.createCloudBlobClient(context, getLogger(), null);
             final CloudBlobContainer container = blobClient.getContainerReference(containerName);
@@ -190,34 +198,44 @@ public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
             final OperationContext operationContext = new OperationContext();
             AzureStorageUtils.setProxy(operationContext, context);
 
-            for (final ListBlobItem blob : container.listBlobs(prefix, true, EnumSet.of(BlobListingDetails.METADATA), null, operationContext)) {
-                if (blob instanceof CloudBlob) {
-                    final CloudBlob cloudBlob = (CloudBlob) blob;
-                    final BlobProperties properties = cloudBlob.getProperties();
-                    final StorageUri uri = cloudBlob.getSnapshotQualifiedStorageUri();
+            ResultContinuation continuationToken = null;
 
-                    final Builder builder = new BlobInfo.Builder()
-                                              .primaryUri(uri.getPrimaryUri().toString())
-                                              .blobName(cloudBlob.getName())
-                                              .containerName(containerName)
-                                              .contentType(properties.getContentType())
-                                              .contentLanguage(properties.getContentLanguage())
-                                              .etag(properties.getEtag())
-                                              .lastModifiedTime(properties.getLastModified().getTime())
-                                              .length(properties.getLength());
+            do {
+                final ResultSegment<ListBlobItem> result = container.listBlobsSegmented(prefix, true, EnumSet.of(BlobListingDetails.METADATA), null, continuationToken, null, operationContext);
+                continuationToken = result.getContinuationToken();
 
-                    if (uri.getSecondaryUri() != null) {
-                        builder.secondaryUri(uri.getSecondaryUri().toString());
+                for (final ListBlobItem blob : result.getResults()) {
+                    if (blob instanceof CloudBlob) {
+                        final CloudBlob cloudBlob = (CloudBlob) blob;
+                        final BlobProperties properties = cloudBlob.getProperties();
+
+                        if (isFileInfoMatchesWithAgeAndSize(context, minimumTimestamp, properties.getLastModified().getTime(), properties.getLength())) {
+                            final StorageUri uri = cloudBlob.getSnapshotQualifiedStorageUri();
+
+                            final Builder builder = new BlobInfo.Builder()
+                                    .primaryUri(uri.getPrimaryUri().toString())
+                                    .blobName(cloudBlob.getName())
+                                    .containerName(containerName)
+                                    .contentType(properties.getContentType())
+                                    .contentLanguage(properties.getContentLanguage())
+                                    .etag(properties.getEtag())
+                                    .lastModifiedTime(properties.getLastModified().getTime())
+                                    .length(properties.getLength());
+
+                            if (uri.getSecondaryUri() != null) {
+                                builder.secondaryUri(uri.getSecondaryUri().toString());
+                            }
+
+                            if (blob instanceof CloudBlockBlob) {
+                                builder.blobType(AzureStorageUtils.BLOCK);
+                            } else {
+                                builder.blobType(AzureStorageUtils.PAGE);
+                            }
+                            listing.add(builder.build());
+                        }
                     }
-
-                    if (blob instanceof CloudBlockBlob) {
-                        builder.blobType(AzureStorageUtils.BLOCK);
-                    } else {
-                        builder.blobType(AzureStorageUtils.PAGE);
-                    }
-                    listing.add(builder.build());
                 }
-            }
+            } while (continuationToken != null);
         } catch (final Throwable t) {
             throw new IOException(ExceptionUtils.getRootCause(t));
         }

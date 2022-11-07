@@ -111,6 +111,8 @@ public class RunNiFi {
     public static final String NIFI_LOCK_FILE_NAME = "nifi.lock";
     public static final String NIFI_BOOTSTRAP_SENSITIVE_KEY = "nifi.bootstrap.sensitive.key";
 
+    public static final String NIFI_BOOTSTRAP_LISTEN_PORT_PROP = "nifi.bootstrap.listen.port";
+
     public static final String PID_KEY = "pid";
 
     public static final int STARTUP_WAIT_SECONDS = 60;
@@ -1025,12 +1027,12 @@ public class RunNiFi {
         notifyStop();
         final long startWait = System.nanoTime();
         while (isProcessRunning(pid, logger)) {
-            logger.info("Waiting for Apache NiFi to finish shutting down...");
+            logger.info("NiFi PID [{}] shutdown in progress...", pid);
             final long waitNanos = System.nanoTime() - startWait;
             final long waitSeconds = TimeUnit.NANOSECONDS.toSeconds(waitNanos);
             if (waitSeconds >= gracefulShutdownSeconds && gracefulShutdownSeconds > 0) {
                 if (isProcessRunning(pid, logger)) {
-                    logger.warn("NiFi has not finished shutting down after {} seconds. Killing process.", gracefulShutdownSeconds);
+                    logger.warn("NiFi PID [{}] shutdown not completed after {} seconds: Killing process", pid, gracefulShutdownSeconds);
                     try {
                         killProcessTree(pid, logger);
                     } catch (final IOException ioe) {
@@ -1054,7 +1056,7 @@ public class RunNiFi {
             logger.error("Failed to delete pid file {}; this file should be cleaned up manually", pidFile);
         }
 
-        logger.info("NiFi has finished shutting down.");
+        logger.info("NiFi PID [{}] shutdown completed", pid);
     }
 
     private static List<String> getChildProcesses(final String ppid) throws IOException {
@@ -1249,8 +1251,18 @@ public class RunNiFi {
             cmdLogger.error("Self-Signed Certificate Generation Failed", e);
         }
 
+        final String listenPortPropString = props.get(NIFI_BOOTSTRAP_LISTEN_PORT_PROP);
+        int listenPortPropInt = 0; // default to zero (random ephemeral port)
+        if (listenPortPropString != null) {
+            try {
+                listenPortPropInt = Integer.parseInt(listenPortPropString.trim());
+            } catch (final Exception e) {
+                // no-op, use the default
+            }
+        }
+
         final NiFiListener listener = new NiFiListener();
-        final int listenPort = listener.start(this);
+        final int listenPort = listener.start(this, listenPortPropInt);
 
         final List<String> cmd = new ArrayList<>();
 
@@ -1315,7 +1327,7 @@ public class RunNiFi {
             cmdLogger.info("Launched Apache NiFi with Process ID " + pid);
         }
 
-        shutdownHook = new ShutdownHook(process, this, secretKey, gracefulShutdownSeconds, loggingExecutor);
+        shutdownHook = new ShutdownHook(process, pid, this, secretKey, gracefulShutdownSeconds, loggingExecutor);
 
         final String hostname = getHostname();
         final SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss.SSS");
@@ -1388,7 +1400,7 @@ public class RunNiFi {
                             cmdLogger.info("Launched Apache NiFi with Process ID " + pid);
                         }
 
-                        shutdownHook = new ShutdownHook(process, this, secretKey, gracefulShutdownSeconds, loggingExecutor);
+                        shutdownHook = new ShutdownHook(process, pid, this, secretKey, gracefulShutdownSeconds, loggingExecutor);
                         runtime.addShutdownHook(shutdownHook);
 
                         final boolean started = waitForStart();

@@ -28,54 +28,64 @@ import org.apache.nifi.connectable.Funnel;
 import org.apache.nifi.connectable.Port;
 import org.apache.nifi.controller.ComponentNode;
 import org.apache.nifi.controller.ControllerService;
+import org.apache.nifi.controller.ParameterProviderNode;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.PropertyConfiguration;
+import org.apache.nifi.controller.ReportingTaskNode;
 import org.apache.nifi.controller.ScheduledState;
+import org.apache.nifi.controller.flow.FlowManager;
 import org.apache.nifi.controller.label.Label;
 import org.apache.nifi.controller.queue.FlowFileQueue;
 import org.apache.nifi.controller.service.ControllerServiceNode;
 import org.apache.nifi.controller.service.ControllerServiceProvider;
-import org.apache.nifi.groups.ProcessGroup;
-import org.apache.nifi.groups.RemoteProcessGroup;
-import org.apache.nifi.nar.ExtensionManager;
-import org.apache.nifi.parameter.Parameter;
-import org.apache.nifi.parameter.ParameterContext;
-import org.apache.nifi.parameter.ParameterDescriptor;
-import org.apache.nifi.processor.Relationship;
-import org.apache.nifi.registry.VariableDescriptor;
 import org.apache.nifi.flow.BatchSize;
 import org.apache.nifi.flow.Bundle;
 import org.apache.nifi.flow.ComponentType;
 import org.apache.nifi.flow.ConnectableComponent;
 import org.apache.nifi.flow.ConnectableComponentType;
 import org.apache.nifi.flow.ControllerServiceAPI;
-import org.apache.nifi.registry.flow.ExternalControllerServiceReference;
-import org.apache.nifi.registry.flow.FlowRegistry;
-import org.apache.nifi.registry.flow.FlowRegistryClient;
+import org.apache.nifi.flow.ExternalControllerServiceReference;
+import org.apache.nifi.flow.ParameterProviderReference;
 import org.apache.nifi.flow.PortType;
 import org.apache.nifi.flow.Position;
-import org.apache.nifi.registry.flow.VersionControlInformation;
 import org.apache.nifi.flow.VersionedConnection;
 import org.apache.nifi.flow.VersionedControllerService;
 import org.apache.nifi.flow.VersionedFlowCoordinates;
+import org.apache.nifi.flow.VersionedFlowRegistryClient;
 import org.apache.nifi.flow.VersionedFunnel;
 import org.apache.nifi.flow.VersionedLabel;
-import org.apache.nifi.registry.flow.VersionedParameter;
-import org.apache.nifi.registry.flow.VersionedParameterContext;
+import org.apache.nifi.flow.VersionedParameter;
+import org.apache.nifi.flow.VersionedParameterContext;
+import org.apache.nifi.flow.VersionedParameterProvider;
 import org.apache.nifi.flow.VersionedPort;
 import org.apache.nifi.flow.VersionedProcessGroup;
 import org.apache.nifi.flow.VersionedProcessor;
 import org.apache.nifi.flow.VersionedPropertyDescriptor;
 import org.apache.nifi.flow.VersionedRemoteGroupPort;
 import org.apache.nifi.flow.VersionedRemoteProcessGroup;
+import org.apache.nifi.flow.VersionedReportingTask;
 import org.apache.nifi.flow.VersionedResourceCardinality;
 import org.apache.nifi.flow.VersionedResourceDefinition;
 import org.apache.nifi.flow.VersionedResourceType;
+import org.apache.nifi.groups.ProcessGroup;
+import org.apache.nifi.groups.RemoteProcessGroup;
+import org.apache.nifi.nar.ExtensionManager;
+import org.apache.nifi.parameter.Parameter;
+import org.apache.nifi.parameter.ParameterContext;
+import org.apache.nifi.parameter.ParameterDescriptor;
+import org.apache.nifi.parameter.ParameterProvider;
+import org.apache.nifi.parameter.ParameterProviderConfiguration;
+import org.apache.nifi.parameter.ParameterReferencedControllerServiceData;
+import org.apache.nifi.processor.Relationship;
+import org.apache.nifi.registry.VariableDescriptor;
+import org.apache.nifi.registry.flow.FlowRegistryClientNode;
+import org.apache.nifi.registry.flow.VersionControlInformation;
 import org.apache.nifi.remote.PublicPort;
 import org.apache.nifi.remote.RemoteGroupPort;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -89,10 +99,12 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-
 public class NiFiRegistryFlowMapper {
+    private static final String ENCRYPTED_PREFIX = "enc{";
+    private static final String ENCRYPTED_SUFFIX = "}";
 
     private final ExtensionManager extensionManager;
+    private final FlowMappingOptions flowMappingOptions;
 
     // We need to keep a mapping of component id to versionedComponentId as we transform these objects. This way, when
     // we call #mapConnectable, instead of generating a new UUID for the ConnectableComponent, we can lookup the 'versioned'
@@ -101,7 +113,12 @@ public class NiFiRegistryFlowMapper {
     private Map<String, String> versionedComponentIds = new HashMap<>();
 
     public NiFiRegistryFlowMapper(final ExtensionManager extensionManager) {
+        this(extensionManager, FlowMappingOptions.DEFAULT_OPTIONS);
+    }
+
+    public NiFiRegistryFlowMapper(final ExtensionManager extensionManager, final FlowMappingOptions flowMappingOptions) {
         this.extensionManager = extensionManager;
+        this.flowMappingOptions = flowMappingOptions;
     }
 
     /**
@@ -124,12 +141,12 @@ public class NiFiRegistryFlowMapper {
      *
      * @param group             the process group to map
      * @param serviceProvider   the controller service provider to use for mapping
-     * @param registryClient    the registry client to use when retrieving versioning details
+     * @param flowManager    the registry client to use when retrieving versioning details
      * @param mapDescendantVersionedFlows  true in order to include descendant flows in the mapped result
      * @return a complete versioned process group with applicable registry related details
      */
     public InstantiatedVersionedProcessGroup mapProcessGroup(final ProcessGroup group, final ControllerServiceProvider serviceProvider,
-                                                             final FlowRegistryClient registryClient,
+                                                             final FlowManager flowManager,
                                                              final boolean mapDescendantVersionedFlows) {
         versionedComponentIds.clear();
 
@@ -140,12 +157,17 @@ public class NiFiRegistryFlowMapper {
             if (versionControlInfo != null) {
                 final VersionedFlowCoordinates coordinates = new VersionedFlowCoordinates();
                 final String registryId = versionControlInfo.getRegistryIdentifier();
-                final FlowRegistry registry = registryClient.getFlowRegistry(registryId);
+                final FlowRegistryClientNode registry = flowManager.getFlowRegistryClient(registryId);
                 if (registry == null) {
                     throw new IllegalStateException("Process Group refers to a Flow Registry with ID " + registryId + " but no Flow Registry exists with that ID. Cannot resolve to a URL.");
                 }
 
-                coordinates.setRegistryUrl(registry.getURL());
+                if (flowMappingOptions.isMapFlowRegistryClientId()) {
+                    coordinates.setRegistryId(registryId);
+                }
+
+                coordinates.setRegistryUrl(getRegistryUrl(registry));
+                coordinates.setStorageLocation(versionControlInfo.getStorageLocation() == null ?getRegistryUrl(registry) : versionControlInfo.getStorageLocation());
                 coordinates.setBucketId(versionControlInfo.getBucketIdentifier());
                 coordinates.setFlowId(versionControlInfo.getFlowIdentifier());
                 coordinates.setVersion(versionControlInfo.getVersion());
@@ -166,6 +188,12 @@ public class NiFiRegistryFlowMapper {
             }
             return true;
         });
+    }
+
+
+    // This is specific for the {@code NifiRegistryFlowRegistryClient}, purely for backward compatibility
+    private String getRegistryUrl(final FlowRegistryClientNode registry) {
+        return registry.getComponentType().equals("org.apache.nifi.registry.flow.NifiRegistryFlowRegistryClient") ? registry.getRawPropertyValue(registry.getPropertyDescriptor("URL")) : "";
     }
 
     private InstantiatedVersionedProcessGroup mapGroup(final ProcessGroup group, final ControllerServiceProvider serviceProvider,
@@ -191,6 +219,9 @@ public class NiFiRegistryFlowMapper {
 
         final InstantiatedVersionedProcessGroup versionedGroup = new InstantiatedVersionedProcessGroup(group.getIdentifier(), group.getProcessGroupIdentifier());
         versionedGroup.setIdentifier(getId(group.getVersionedComponentId(), group.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedGroup.setInstanceIdentifier(group.getIdentifier());
+        }
         versionedGroup.setGroupIdentifier(getGroupId(group.getProcessGroupIdentifier()));
         versionedGroup.setName(group.getName());
         versionedGroup.setComments(group.getComments());
@@ -299,13 +330,7 @@ public class NiFiRegistryFlowMapper {
     }
 
     private String getId(final Optional<String> currentVersionedId, final String componentId) {
-        final String versionedId;
-        if (currentVersionedId.isPresent()) {
-            versionedId = currentVersionedId.get();
-        } else {
-            versionedId = generateVersionedComponentId(componentId);
-        }
-
+        final String versionedId = flowMappingOptions.getComponentIdLookup().getComponentId(currentVersionedId, componentId);
         versionedComponentIds.put(componentId, versionedId);
         return versionedId;
     }
@@ -321,17 +346,13 @@ public class NiFiRegistryFlowMapper {
         return UUID.nameUUIDFromBytes(componentId.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
-    private <E extends Exception> String getIdOrThrow(final Optional<String> currentVersionedId, final String componentId, final Supplier<E> exceptionSupplier) throws E {
-        if (currentVersionedId.isPresent()) {
-            return currentVersionedId.get();
-        } else {
-            final String resolved = versionedComponentIds.get(componentId);
-            if (resolved == null) {
-                throw exceptionSupplier.get();
-            }
-
-            return resolved;
+    private <E extends Exception> String getIdOrThrow(final String componentId, final Supplier<E> exceptionSupplier) throws E {
+        final String resolved = versionedComponentIds.get(componentId);
+        if (resolved == null) {
+            throw exceptionSupplier.get();
         }
+
+        return resolved;
     }
 
 
@@ -344,6 +365,9 @@ public class NiFiRegistryFlowMapper {
 
         final VersionedConnection versionedConnection = new InstantiatedVersionedConnection(connection.getIdentifier(), connection.getProcessGroup().getIdentifier());
         versionedConnection.setIdentifier(getId(connection.getVersionedComponentId(), connection.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedConnection.setInstanceIdentifier(connection.getIdentifier());
+        }
         versionedConnection.setGroupIdentifier(getGroupId(connection.getProcessGroup().getIdentifier()));
         versionedConnection.setName(connection.getName());
         versionedConnection.setBackPressureDataSizeThreshold(queue.getBackPressureDataSizeThreshold());
@@ -372,9 +396,12 @@ public class NiFiRegistryFlowMapper {
     public ConnectableComponent mapConnectable(final Connectable connectable) {
         final ConnectableComponent component = new InstantiatedConnectableComponent(connectable.getIdentifier(), connectable.getProcessGroupIdentifier());
 
-        final String versionedId = getIdOrThrow(connectable.getVersionedComponentId(), connectable.getIdentifier(),
+        final String versionedId = getIdOrThrow(connectable.getIdentifier(),
             () -> new IllegalArgumentException("Unable to map Connectable Component with identifier " + connectable.getIdentifier() + " to any version-controlled component"));
         component.setId(versionedId);
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            component.setInstanceIdentifier(connectable.getIdentifier());
+        }
 
         component.setComments(connectable.getComments());
 
@@ -382,12 +409,11 @@ public class NiFiRegistryFlowMapper {
         if (connectable instanceof RemoteGroupPort) {
             final RemoteGroupPort port = (RemoteGroupPort) connectable;
             final RemoteProcessGroup rpg = port.getRemoteProcessGroup();
-            final Optional<String> rpgVersionedId = rpg.getVersionedComponentId();
-            groupId = getIdOrThrow(rpgVersionedId, rpg.getIdentifier(),
+            groupId = getIdOrThrow(rpg.getIdentifier(),
                 () -> new IllegalArgumentException("Unable to find the Versioned Component ID for Remote Process Group that " + connectable + " belongs to"));
 
         } else {
-            groupId = getIdOrThrow(connectable.getProcessGroup().getVersionedComponentId(), connectable.getProcessGroupIdentifier(),
+            groupId = getIdOrThrow(connectable.getProcessGroupIdentifier(),
                 () -> new IllegalArgumentException("Unable to find the Versioned Component ID for the Process Group that " + connectable + " belongs to"));
         }
 
@@ -398,20 +424,87 @@ public class NiFiRegistryFlowMapper {
         return component;
     }
 
+    public VersionedReportingTask mapReportingTask(final ReportingTaskNode taskNode, final ControllerServiceProvider serviceProvider) {
+        final VersionedReportingTask versionedTask = new VersionedReportingTask();
+        versionedTask.setIdentifier(taskNode.getIdentifier());
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedTask.setInstanceIdentifier(taskNode.getIdentifier());
+        }
+        versionedTask.setAnnotationData(taskNode.getAnnotationData());
+        versionedTask.setBundle(mapBundle(taskNode.getBundleCoordinate()));
+        versionedTask.setComments(taskNode.getComments());
+        versionedTask.setComponentType(ComponentType.REPORTING_TASK);
+        versionedTask.setName(taskNode.getName());
+
+        versionedTask.setProperties(mapProperties(taskNode, serviceProvider));
+        versionedTask.setPropertyDescriptors(mapPropertyDescriptors(taskNode, serviceProvider, Collections.emptySet(), Collections.emptyMap()));
+        versionedTask.setSchedulingPeriod(taskNode.getSchedulingPeriod());
+        versionedTask.setSchedulingStrategy(taskNode.getSchedulingStrategy().name());
+        versionedTask.setType(taskNode.getCanonicalClassName());
+        versionedTask.setScheduledState(flowMappingOptions.getStateLookup().getState(taskNode));
+
+        return versionedTask;
+    }
+
+    public VersionedParameterProvider mapParameterProvider(final ParameterProviderNode parameterProviderNode, final ControllerServiceProvider serviceProvider) {
+        final VersionedParameterProvider versionedParameterProvider = new VersionedParameterProvider();
+        versionedParameterProvider.setIdentifier(parameterProviderNode.getIdentifier());
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedParameterProvider.setInstanceIdentifier(parameterProviderNode.getIdentifier());
+        }
+        versionedParameterProvider.setAnnotationData(parameterProviderNode.getAnnotationData());
+        versionedParameterProvider.setBundle(mapBundle(parameterProviderNode.getBundleCoordinate()));
+        versionedParameterProvider.setComments(parameterProviderNode.getComments());
+        versionedParameterProvider.setComponentType(ComponentType.PARAMETER_PROVIDER);
+        versionedParameterProvider.setName(parameterProviderNode.getName());
+
+        versionedParameterProvider.setProperties(mapProperties(parameterProviderNode, serviceProvider));
+        versionedParameterProvider.setPropertyDescriptors(mapPropertyDescriptors(parameterProviderNode, serviceProvider, Collections.emptySet(), Collections.emptyMap()));
+        versionedParameterProvider.setType(parameterProviderNode.getCanonicalClassName());
+
+        return versionedParameterProvider;
+    }
+
+    public VersionedFlowRegistryClient mapFlowRegistryClient(final FlowRegistryClientNode clientNode, final ControllerServiceProvider serviceProvider) {
+        final VersionedFlowRegistryClient versionedClient = new VersionedFlowRegistryClient();
+        versionedClient.setIdentifier(clientNode.getIdentifier());
+
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedClient.setInstanceIdentifier(clientNode.getIdentifier());
+        }
+
+        versionedClient.setAnnotationData(clientNode.getAnnotationData());
+        versionedClient.setBundle(mapBundle(clientNode.getBundleCoordinate()));
+        versionedClient.setComponentType(ComponentType.FLOW_REGISTRY_CLIENT);
+        versionedClient.setName(clientNode.getName());
+        versionedClient.setDescription(clientNode.getDescription());
+
+        versionedClient.setProperties(mapProperties(clientNode, serviceProvider));
+        versionedClient.setPropertyDescriptors(mapPropertyDescriptors(clientNode, serviceProvider, Collections.emptySet(), Collections.emptyMap()));
+        versionedClient.setType(clientNode.getCanonicalClassName());
+
+        return versionedClient;
+    }
+
     public VersionedControllerService mapControllerService(final ControllerServiceNode controllerService, final ControllerServiceProvider serviceProvider, final Set<String> includedGroupIds,
                                                            final Map<String, ExternalControllerServiceReference> externalControllerServiceReferences) {
         final VersionedControllerService versionedService = new InstantiatedVersionedControllerService(controllerService.getIdentifier(), controllerService.getProcessGroupIdentifier());
         versionedService.setIdentifier(getId(controllerService.getVersionedComponentId(), controllerService.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedService.setInstanceIdentifier(controllerService.getIdentifier());
+        }
         versionedService.setGroupIdentifier(getGroupId(controllerService.getProcessGroupIdentifier()));
         versionedService.setName(controllerService.getName());
         versionedService.setAnnotationData(controllerService.getAnnotationData());
         versionedService.setBundle(mapBundle(controllerService.getBundleCoordinate()));
         versionedService.setComments(controllerService.getComments());
+        versionedService.setBulletinLevel(controllerService.getBulletinLevel().name());
 
         versionedService.setControllerServiceApis(mapControllerServiceApis(controllerService));
         versionedService.setProperties(mapProperties(controllerService, serviceProvider));
         versionedService.setPropertyDescriptors(mapPropertyDescriptors(controllerService, serviceProvider, includedGroupIds, externalControllerServiceReferences));
         versionedService.setType(controllerService.getCanonicalClassName());
+        versionedService.setScheduledState(flowMappingOptions.getStateLookup().getState(controllerService));
 
         return versionedService;
     }
@@ -427,7 +520,7 @@ public class NiFiRegistryFlowMapper {
                     value = property.getDefaultValue();
                 }
 
-                if (value != null && property.getControllerServiceDefinition() != null) {
+                if (value != null && property.getControllerServiceDefinition() != null && flowMappingOptions.isMapControllerServiceReferencesToVersionedId()) {
                     // Property references a Controller Service. Instead of storing the existing value, we want
                     // to store the Versioned Component ID of the service.
                     final ControllerServiceNode controllerService = serviceProvider.getControllerServiceNode(value);
@@ -436,14 +529,37 @@ public class NiFiRegistryFlowMapper {
                     }
                 }
 
+                if (property.isSensitive()) {
+                    value = encrypt(value);
+                }
+
                 mapped.put(property.getName(), value);
             });
 
         return mapped;
     }
 
+    private String encrypt(final String value) {
+        if (value == null) {
+            return null;
+        }
+
+        final SensitiveValueEncryptor encryptor = flowMappingOptions.getSensitiveValueEncryptor();
+        if (encryptor == null) {
+            // This will happen only if the given property is mappable, which means that it is a parameter reference.
+            return value;
+        }
+
+        final String encrypted = encryptor.encrypt(value);
+        return ENCRYPTED_PREFIX + encrypted + ENCRYPTED_SUFFIX;
+    }
+
     private boolean isMappable(final PropertyDescriptor propertyDescriptor, final PropertyConfiguration propertyConfiguration) {
         if (!propertyDescriptor.isSensitive()) { // If the property is not sensitive, it can be mapped.
+            return true;
+        }
+
+        if (flowMappingOptions.isMapSensitiveConfiguration()) {
             return true;
         }
 
@@ -459,6 +575,11 @@ public class NiFiRegistryFlowMapper {
 
     private Map<String, VersionedPropertyDescriptor> mapPropertyDescriptors(final ComponentNode component, final ControllerServiceProvider serviceProvider, final Set<String> includedGroupIds,
                                                                             final Map<String, ExternalControllerServiceReference> externalControllerServiceReferences) {
+
+        if (!flowMappingOptions.isMapPropertyDescriptors()) {
+            return Collections.emptyMap();
+        }
+
         final Map<String, VersionedPropertyDescriptor> descriptors = new HashMap<>();
         for (final PropertyDescriptor descriptor : component.getProperties().keySet()) {
             final VersionedPropertyDescriptor versionedDescriptor = new VersionedPropertyDescriptor();
@@ -553,6 +674,9 @@ public class NiFiRegistryFlowMapper {
     public VersionedFunnel mapFunnel(final Funnel funnel) {
         final VersionedFunnel versionedFunnel = new InstantiatedVersionedFunnel(funnel.getIdentifier(), funnel.getProcessGroupIdentifier());
         versionedFunnel.setIdentifier(getId(funnel.getVersionedComponentId(), funnel.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedFunnel.setInstanceIdentifier(funnel.getIdentifier());
+        }
         versionedFunnel.setGroupIdentifier(getGroupId(funnel.getProcessGroupIdentifier()));
         versionedFunnel.setPosition(mapPosition(funnel.getPosition()));
 
@@ -562,12 +686,16 @@ public class NiFiRegistryFlowMapper {
     public VersionedLabel mapLabel(final Label label) {
         final VersionedLabel versionedLabel = new InstantiatedVersionedLabel(label.getIdentifier(), label.getProcessGroupIdentifier());
         versionedLabel.setIdentifier(getId(label.getVersionedComponentId(), label.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedLabel.setInstanceIdentifier(label.getIdentifier());
+        }
         versionedLabel.setGroupIdentifier(getGroupId(label.getProcessGroupIdentifier()));
         versionedLabel.setHeight(label.getSize().getHeight());
         versionedLabel.setWidth(label.getSize().getWidth());
         versionedLabel.setLabel(label.getValue());
         versionedLabel.setPosition(mapPosition(label.getPosition()));
         versionedLabel.setStyle(label.getStyle());
+        versionedLabel.setzIndex(label.getZIndex());
 
         return versionedLabel;
     }
@@ -575,18 +703,18 @@ public class NiFiRegistryFlowMapper {
     public VersionedPort mapPort(final Port port) {
         final VersionedPort versionedPort = new InstantiatedVersionedPort(port.getIdentifier(), port.getProcessGroupIdentifier());
         versionedPort.setIdentifier(getId(port.getVersionedComponentId(), port.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedPort.setInstanceIdentifier(port.getIdentifier());
+        }
         versionedPort.setGroupIdentifier(getGroupId(port.getProcessGroupIdentifier()));
         versionedPort.setComments(port.getComments());
         versionedPort.setConcurrentlySchedulableTaskCount(port.getMaxConcurrentTasks());
         versionedPort.setName(port.getName());
         versionedPort.setPosition(mapPosition(port.getPosition()));
         versionedPort.setType(PortType.valueOf(port.getConnectableType().name()));
-
-        if (port instanceof PublicPort) {
-            versionedPort.setAllowRemoteAccess(true);
-        } else {
-            versionedPort.setAllowRemoteAccess(false);
-        }
+        versionedPort.setScheduledState(mapScheduledState(port.getScheduledState()));
+        versionedPort.setAllowRemoteAccess(port instanceof PublicPort);
+        versionedPort.setScheduledState(flowMappingOptions.getStateLookup().getState(port));
 
         return versionedPort;
     }
@@ -602,6 +730,9 @@ public class NiFiRegistryFlowMapper {
                                            final Map<String, ExternalControllerServiceReference> externalControllerServiceReferences) {
         final VersionedProcessor processor = new InstantiatedVersionedProcessor(procNode.getIdentifier(), procNode.getProcessGroupIdentifier());
         processor.setIdentifier(getId(procNode.getVersionedComponentId(), procNode.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            processor.setInstanceIdentifier(procNode.getIdentifier());
+        }
         processor.setGroupIdentifier(getGroupId(procNode.getProcessGroupIdentifier()));
         processor.setType(procNode.getCanonicalClassName());
         processor.setAnnotationData(procNode.getAnnotationData());
@@ -621,8 +752,11 @@ public class NiFiRegistryFlowMapper {
         processor.setSchedulingStrategy(procNode.getSchedulingStrategy().name());
         processor.setStyle(procNode.getStyle());
         processor.setYieldDuration(procNode.getYieldPeriod());
-        processor.setScheduledState(procNode.getScheduledState() == ScheduledState.DISABLED ? org.apache.nifi.flow.ScheduledState.DISABLED
-            : org.apache.nifi.flow.ScheduledState.ENABLED);
+        processor.setScheduledState(flowMappingOptions.getStateLookup().getState(procNode));
+        processor.setRetryCount(procNode.getRetryCount());
+        processor.setRetriedRelationships(procNode.getRetriedRelationships());
+        processor.setBackoffMechanism(procNode.getBackoffMechanism().name());
+        processor.setMaxBackoffPeriod(procNode.getMaxBackoffPeriod());
 
         return processor;
     }
@@ -630,6 +764,9 @@ public class NiFiRegistryFlowMapper {
     public VersionedRemoteProcessGroup mapRemoteProcessGroup(final RemoteProcessGroup remoteGroup) {
         final VersionedRemoteProcessGroup rpg = new InstantiatedVersionedRemoteProcessGroup(remoteGroup.getIdentifier(), remoteGroup.getProcessGroupIdentifier());
         rpg.setIdentifier(getId(remoteGroup.getVersionedComponentId(), remoteGroup.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            rpg.setInstanceIdentifier(remoteGroup.getIdentifier());
+        }
         rpg.setGroupIdentifier(getGroupId(remoteGroup.getProcessGroupIdentifier()));
         rpg.setComments(remoteGroup.getComments());
         rpg.setCommunicationsTimeout(remoteGroup.getCommunicationsTimeout());
@@ -655,6 +792,9 @@ public class NiFiRegistryFlowMapper {
     public VersionedRemoteGroupPort mapRemotePort(final RemoteGroupPort remotePort, final ComponentType componentType) {
         final VersionedRemoteGroupPort port = new InstantiatedVersionedRemoteGroupPort(remotePort.getIdentifier(), remotePort.getRemoteProcessGroup().getIdentifier());
         port.setIdentifier(getId(remotePort.getVersionedComponentId(), remotePort.getIdentifier()));
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            port.setInstanceIdentifier(remotePort.getIdentifier());
+        }
         port.setGroupIdentifier(getGroupId(remotePort.getRemoteProcessGroup().getIdentifier()));
         port.setComments(remotePort.getComments());
         port.setConcurrentlySchedulableTaskCount(remotePort.getMaxConcurrentTasks());
@@ -664,6 +804,8 @@ public class NiFiRegistryFlowMapper {
         port.setBatchSize(mapBatchSettings(remotePort));
         port.setTargetId(remotePort.getTargetIdentifier());
         port.setComponentType(componentType);
+        port.setScheduledState(flowMappingOptions.getStateLookup().getState(remotePort));
+
         return port;
     }
 
@@ -675,59 +817,165 @@ public class NiFiRegistryFlowMapper {
         return batchSize;
     }
 
+    public VersionedParameterContext mapParameterContext(final ParameterContext parameterContext) {
+        final Set<VersionedParameter> versionedParameters = mapParameters(parameterContext);
+
+        final VersionedParameterContext versionedParameterContext = new VersionedParameterContext();
+        versionedParameterContext.setDescription(parameterContext.getDescription());
+        versionedParameterContext.setName(parameterContext.getName());
+        versionedParameterContext.setParameters(versionedParameters);
+        final String versionedContextId = flowMappingOptions.getComponentIdLookup().getComponentId(Optional.empty(), parameterContext.getIdentifier());
+        versionedParameterContext.setIdentifier(versionedContextId);
+        versionedParameterContext.setInheritedParameterContexts(parameterContext.getInheritedParameterContextNames());
+        configureParameterProvider(parameterContext, versionedParameterContext);
+
+        if (flowMappingOptions.isMapInstanceIdentifiers()) {
+            versionedParameterContext.setInstanceIdentifier(parameterContext.getIdentifier());
+        }
+
+        return versionedParameterContext;
+    }
+
+    private void configureParameterProvider(final ParameterContext parameterContext, final VersionedParameterContext versionedParameterContext) {
+        final ParameterProviderConfiguration parameterProviderConfiguration = parameterContext.getParameterProviderConfiguration();
+        if (parameterProviderConfiguration != null) {
+            versionedParameterContext.setParameterGroupName(parameterProviderConfiguration.getParameterGroupName());
+            versionedParameterContext.setParameterProvider(parameterProviderConfiguration.getParameterProviderId());
+            versionedParameterContext.setSynchronized(parameterProviderConfiguration.isSynchronized());
+        }
+    }
+
     public Map<String, VersionedParameterContext> mapParameterContexts(final ProcessGroup processGroup,
-                                                                       final boolean mapDescendantVersionedFlows) {
+                                                                       final boolean mapDescendantVersionedFlows,
+                                                                       final Map<String, ParameterProviderReference> parameterProviderReferences) {
         // cannot use a set to enforce uniqueness of parameter contexts because VersionedParameterContext in the
         // registry data model doesn't currently implement hashcode/equals based on context name
         final Map<String, VersionedParameterContext> parameterContexts = new HashMap<>();
-        mapParameterContexts(processGroup, mapDescendantVersionedFlows, parameterContexts);
+        mapParameterContexts(processGroup, mapDescendantVersionedFlows, parameterContexts, parameterProviderReferences);
         return parameterContexts;
     }
 
     private void mapParameterContexts(final ProcessGroup processGroup, final boolean mapDescendantVersionedFlows,
-                                      final Map<String, VersionedParameterContext> parameterContexts) {
+                                      final Map<String, VersionedParameterContext> parameterContexts,
+                                      final Map<String, ParameterProviderReference> parameterProviderReferences) {
         final ParameterContext parameterContext = processGroup.getParameterContext();
         if (parameterContext != null) {
-            mapParameterContext(parameterContext, parameterContexts);
+            mapParameterContext(parameterContext, parameterContexts, parameterProviderReferences);
         }
 
         for (final ProcessGroup child : processGroup.getProcessGroups()) {
             // only include child process group parameter contexts if boolean indicator is true or process group is unversioned
             if (mapDescendantVersionedFlows || child.getVersionControlInformation() == null) {
-                mapParameterContexts(child, mapDescendantVersionedFlows, parameterContexts);
+                mapParameterContexts(child, mapDescendantVersionedFlows, parameterContexts, parameterProviderReferences);
             }
         }
     }
 
-    private void mapParameterContext(final ParameterContext parameterContext, final Map<String, VersionedParameterContext> parameterContexts) {
+    private void mapParameterContext(final ParameterContext parameterContext, final Map<String, VersionedParameterContext> parameterContexts,
+                                     final Map<String, ParameterProviderReference> parameterProviderReferences) {
         // map this process group's parameter context and add to the collection
-        final Set<VersionedParameter> parameters = parameterContext.getParameters().values().stream()
-                .map(this::mapParameter)
-                .collect(Collectors.toSet());
+        final Set<VersionedParameter> parameters = mapParameters(parameterContext);
 
         final VersionedParameterContext versionedContext = new VersionedParameterContext();
         versionedContext.setName(parameterContext.getName());
         versionedContext.setParameters(parameters);
         versionedContext.setInheritedParameterContexts(parameterContext.getInheritedParameterContextNames());
-        for(final ParameterContext inheritedParameterContext : parameterContext.getInheritedParameterContexts()) {
-            mapParameterContext(inheritedParameterContext, parameterContexts);
+
+        configureParameterProvider(parameterContext, versionedContext);
+        if (versionedContext.getParameterProvider() != null) {
+            parameterProviderReferences.put(versionedContext.getParameterProvider(), createParameterProviderReference(parameterContext));
+        }
+        for (final ParameterContext inheritedParameterContext : parameterContext.getInheritedParameterContexts()) {
+            mapParameterContext(inheritedParameterContext, parameterContexts, parameterProviderReferences);
         }
 
         parameterContexts.put(versionedContext.getName(), versionedContext);
     }
 
-    private VersionedParameter mapParameter(final Parameter parameter) {
-        if (parameter == null) {
+    private Set<VersionedParameter> mapParameters(ParameterContext parameterContext) {
+        final Set<VersionedParameter> parameters = parameterContext.getParameters().entrySet().stream()
+                .map(descriptorAndParameter -> mapParameter(
+                    parameterContext,
+                    descriptorAndParameter.getKey(),
+                    descriptorAndParameter.getValue())
+                )
+                .collect(Collectors.toSet());
+        return parameters;
+    }
+
+    private VersionedParameter mapParameter(ParameterContext parameterContext, ParameterDescriptor parameterDescriptor, Parameter parameter) {
+        VersionedParameter versionedParameter;
+
+        if (this.flowMappingOptions.isMapControllerServiceReferencesToVersionedId()) {
+            List<ParameterReferencedControllerServiceData> referencedControllerServiceData = parameterContext
+                .getParameterReferenceManager()
+                .getReferencedControllerServiceData(parameterContext, parameterDescriptor.getName());
+
+            if (referencedControllerServiceData.isEmpty()) {
+                versionedParameter = mapParameter(parameter);
+            } else {
+                versionedParameter = mapParameter(
+                    parameter,
+                    getId(Optional.ofNullable(referencedControllerServiceData.get(0).getVersionedServiceId()), parameter.getValue())
+                );
+            }
+        } else {
+            versionedParameter = mapParameter(parameter);
+        }
+
+        return versionedParameter;
+    }
+
+    private ParameterProviderReference createParameterProviderReference(final ParameterContext parameterContext) {
+        if (parameterContext.getParameterProvider() == null) {
             return null;
         }
 
+        final ParameterProviderReference reference = new ParameterProviderReference();
+        final ParameterProvider parameterProvider = parameterContext.getParameterProvider();
+        final ParameterProviderNode parameterProviderNode = parameterContext.getParameterProviderLookup().getParameterProvider(parameterProvider.getIdentifier());
+        final BundleCoordinate bundleCoordinate = parameterProviderNode.getBundleCoordinate();
+
+        reference.setIdentifier(parameterProvider.getIdentifier());
+        reference.setName(parameterProviderNode.getName());
+        reference.setType(parameterProvider.getClass().getName());
+        reference.setBundle(new Bundle(bundleCoordinate.getGroup(), bundleCoordinate.getId(), bundleCoordinate.getVersion()));
+
+        return reference;
+    }
+
+    private VersionedParameter mapParameter(final Parameter parameter) {
+        return mapParameter(parameter, parameter.getValue());
+    }
+
+    private VersionedParameter mapParameter(final Parameter parameter, final String value) {
         final ParameterDescriptor descriptor = parameter.getDescriptor();
 
         final VersionedParameter versionedParameter = new VersionedParameter();
         versionedParameter.setDescription(descriptor.getDescription());
         versionedParameter.setName(descriptor.getName());
         versionedParameter.setSensitive(descriptor.isSensitive());
-        versionedParameter.setValue(descriptor.isSensitive() ? null : parameter.getValue());
+        versionedParameter.setProvided(parameter.isProvided());
+
+        final boolean mapParameterValue = flowMappingOptions.isMapSensitiveConfiguration() || !descriptor.isSensitive();
+        final String parameterValue;
+        if (mapParameterValue) {
+            if (descriptor.isSensitive()) {
+                parameterValue = encrypt(value);
+            } else {
+                parameterValue = value;
+            }
+        } else {
+            parameterValue = null;
+        }
+
+        versionedParameter.setValue(parameterValue);
         return versionedParameter;
+    }
+
+    private org.apache.nifi.flow.ScheduledState mapScheduledState(final ScheduledState scheduledState) {
+         return scheduledState == ScheduledState.DISABLED
+                 ? org.apache.nifi.flow.ScheduledState.DISABLED
+                 : org.apache.nifi.flow.ScheduledState.ENABLED;
     }
 }

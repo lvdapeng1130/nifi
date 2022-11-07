@@ -25,7 +25,8 @@
     <artifactId>nifi-email-processors</artifactId>
     <packaging>jar</packaging>
     <properties>
-        <spring.integration.version>5.5.2</spring.integration.version>
+        <spring.integration.version>5.5.7</spring.integration.version>
+        <poi.version>5.2.2</poi.version>
     </properties>
 
     <dependencies>
@@ -35,7 +36,7 @@
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-processor-utils</artifactId>
+            <artifactId>nifi-utils</artifactId>
             <version>1.18.0</version>
         </dependency>
         <dependency>
@@ -53,6 +54,10 @@
                     <artifactId>javax.mail</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
         </dependency>
         <dependency>
             <groupId>com.sun.mail</groupId>
@@ -83,6 +88,16 @@
             <groupId>com.microsoft.ews-java-api</groupId>
             <artifactId>ews-java-api</artifactId>
             <version>2.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>jcl-over-slf4j</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -102,7 +117,7 @@
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-scratchpad</artifactId>
-            <version>5.0.0</version>
+            <version>${poi.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -113,7 +128,7 @@
         <dependency>
             <groupId>com.icegreen</groupId>
             <artifactId>greenmail</artifactId>
-            <version>1.5.11</version>
+            <version>1.6.10</version>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -23,22 +23,20 @@ import org.apache.nifi.tests.system.SpawnedClusterNiFiInstanceFactory;
 import org.apache.nifi.toolkit.cli.impl.client.nifi.NiFiClientException;
 import org.apache.nifi.web.api.dto.NodeDTO;
 import org.apache.nifi.web.api.dto.ProcessorConfigDTO;
-import org.apache.nifi.web.api.entity.ClusterEntity;
 import org.apache.nifi.web.api.entity.ConnectionEntity;
 import org.apache.nifi.web.api.entity.ProcessorEntity;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.Collection;
 import java.util.Collections;
 
 public class OffloadIT extends NiFiSystemIT {
     private static final Logger logger = LoggerFactory.getLogger(OffloadIT.class);
 
     @Override
-    protected NiFiInstanceFactory getInstanceFactory() {
+    public NiFiInstanceFactory getInstanceFactory() {
         return new SpawnedClusterNiFiInstanceFactory(
             "src/test/resources/conf/clustered/node1/bootstrap.conf",
             "src/test/resources/conf/clustered/node2/bootstrap.conf");
@@ -72,47 +70,17 @@ public class OffloadIT extends NiFiSystemIT {
 
         waitForQueueNotEmpty(connectionEntity.getId());
 
-        final NodeDTO node2Dto = getNodeDTO(5672);
+        final NodeDTO node2Dto = getNodeDtoByApiPort(5672);
 
         disconnectNode(node2Dto);
+        waitForNodeStatus(node2Dto, "DISCONNECTED");
 
         final String nodeId = node2Dto.getNodeId();
         getClientUtil().offloadNode(nodeId);
-        waitFor(this::isNodeOffloaded);
+        waitForNodeStatus(node2Dto, "OFFLOADED");
 
         getClientUtil().connectNode(nodeId);
         waitForAllNodesConnected();
-    }
-
-    private boolean isNodeOffloaded() {
-        final ClusterEntity clusterEntity;
-        try {
-            clusterEntity = getNifiClient().getControllerClient().getNodes();
-        } catch (final Exception e) {
-            logger.error("Failed to determine if node is offloaded", e);
-            return false;
-        }
-
-        final Collection<NodeDTO> nodeDtos = clusterEntity.getCluster().getNodes();
-
-        for (final NodeDTO dto : nodeDtos) {
-            final String status = dto.getStatus();
-            if (status.equalsIgnoreCase("OFFLOADED")) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private NodeDTO getNodeDTO(final int apiPort) throws NiFiClientException, IOException {
-        final ClusterEntity clusterEntity = getNifiClient().getControllerClient().getNodes();
-        final NodeDTO node2Dto = clusterEntity.getCluster().getNodes().stream()
-            .filter(nodeDto -> nodeDto.getApiPort() == apiPort)
-            .findAny()
-            .orElseThrow(() -> new RuntimeException("Could not locate Node 2"));
-
-        return node2Dto;
     }
 
 
@@ -122,7 +90,7 @@ public class OffloadIT extends NiFiSystemIT {
         final Integer apiPort = nodeDto.getApiPort();
         waitFor(() -> {
             try {
-                final NodeDTO dto = getNodeDTO(apiPort);
+                final NodeDTO dto = getNodeDtoByApiPort(apiPort);
                 final String status = dto.getStatus();
                 return "DISCONNECTED".equals(status);
             } catch (final Exception e) {

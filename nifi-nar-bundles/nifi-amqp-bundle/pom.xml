@@ -21,7 +21,6 @@
         <version>1.18.0</version>
     </parent>
     <artifactId>nifi-amqp-bundle</artifactId>
-    <version>1.18.0</version>
     <packaging>pom</packaging>
     <description>A bundle of processors that publish to and consume messages from AMQP.</description>
     <modules>

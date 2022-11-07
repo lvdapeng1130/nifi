@@ -16,37 +16,21 @@
  */
 package org.apache.nifi.processors.standard;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.lang.ProcessBuilder.Redirect;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.annotation.behavior.DynamicProperties;
+import org.apache.nifi.annotation.behavior.Restricted;
+import org.apache.nifi.annotation.behavior.Restriction;
+
 import org.apache.nifi.annotation.behavior.DynamicProperty;
+import org.apache.nifi.annotation.behavior.WritesAttributes;
+import org.apache.nifi.annotation.behavior.WritesAttribute;
+import org.apache.nifi.annotation.behavior.SupportsSensitiveDynamicProperties;
 import org.apache.nifi.annotation.behavior.EventDriven;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
-import org.apache.nifi.annotation.behavior.Restricted;
-import org.apache.nifi.annotation.behavior.Restriction;
 import org.apache.nifi.annotation.behavior.SupportsBatching;
-import org.apache.nifi.annotation.behavior.WritesAttribute;
-import org.apache.nifi.annotation.behavior.WritesAttributes;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.components.AllowableValue;
@@ -67,11 +51,29 @@ import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.io.InputStreamCallback;
-import org.apache.nifi.processor.io.OutputStreamCallback;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.processors.standard.util.ArgumentUtils;
 import org.apache.nifi.processors.standard.util.SoftLimitBoundedByteArrayOutputStream;
 import org.apache.nifi.stream.io.StreamUtils;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.ProcessBuilder.Redirect;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * <p>
@@ -141,23 +143,23 @@ import org.apache.nifi.stream.io.StreamUtils;
  * </li>
  * </ul>
  * <p>
- *
  */
 @EventDriven
 @SupportsBatching
 @InputRequirement(Requirement.INPUT_REQUIRED)
 @Tags({"command execution", "command", "stream", "execute"})
 @CapabilityDescription("Executes an external command on the contents of a flow file, and creates a new flow file with the results of the command.")
+@SupportsSensitiveDynamicProperties
 @DynamicProperties({
-    @DynamicProperty(name = "An environment variable name", value = "An environment variable value",
-        description = "These environment variables are passed to the process spawned by this Processor"),
-    @DynamicProperty(name = "command.argument.<NUMBER>", value = "Argument to be supplied to the command",
-        description = "These arguments are supplied to the process spawned by this Processor when using the "
-        + "Command Arguments Strategy : Dynamic Property Arguments. The NUMBER will determine the order.")
+        @DynamicProperty(name = "An environment variable name", value = "An environment variable value",
+                description = "These environment variables are passed to the process spawned by this Processor"),
+        @DynamicProperty(name = "command.argument.<NUMBER>", value = "Argument to be supplied to the command",
+                description = "These arguments are supplied to the process spawned by this Processor when using the "
+                        + "Command Arguments Strategy : Dynamic Property Arguments. The NUMBER will determine the order.")
 })
 @WritesAttributes({
         @WritesAttribute(attribute = "execution.command", description = "The name of the command executed"),
-        @WritesAttribute(attribute = "execution.command.args", description = "The semi-colon delimited list of arguments"),
+        @WritesAttribute(attribute = "execution.command.args", description = "The semi-colon delimited list of arguments. Sensitive properties will be masked"),
         @WritesAttribute(attribute = "execution.status", description = "The exit status code returned from executing the command"),
         @WritesAttribute(attribute = "execution.error", description = "Any error messages returned from executing the command")})
 @Restricted(
@@ -171,7 +173,7 @@ public class ExecuteStreamCommand extends AbstractProcessor {
 
     public static final Relationship ORIGINAL_RELATIONSHIP = new Relationship.Builder()
             .name("original")
-            .description("FlowFiles that were successfully processed.")
+            .description("The original FlowFile will be routed. It will have new attributes detailing the result of the script execution.")
             .build();
     public static final Relationship OUTPUT_STREAM_RELATIONSHIP = new Relationship.Builder()
             .name("output stream")
@@ -182,7 +184,7 @@ public class ExecuteStreamCommand extends AbstractProcessor {
             .description("The destination path for the flow file created from the command's output, if the returned status code is non-zero. "
                     + "All flow files routed to this relationship will be penalized.")
             .build();
-    private AtomicReference<Set<Relationship>> relationships = new AtomicReference<>();
+    private final AtomicReference<Set<Relationship>> relationships = new AtomicReference<>();
 
     private final static Set<Relationship> OUTPUT_STREAM_RELATIONSHIP_SET;
     private final static Set<Relationship> ATTRIBUTE_RELATIONSHIP_SET;
@@ -191,10 +193,10 @@ public class ExecuteStreamCommand extends AbstractProcessor {
     public static final String executionArguments = "Command Arguments Property";
     public static final String dynamicArguements = "Dynamic Property Arguments";
 
-    static final AllowableValue EXECUTION_ARGUMENTS_PROPERTY_STRATEGEY = new AllowableValue(executionArguments, executionArguments,
+    static final AllowableValue EXECUTION_ARGUMENTS_PROPERTY_STRATEGY = new AllowableValue(executionArguments, executionArguments,
             "Arguments to be supplied to the executable are taken from the Command Arguments property");
 
-    static final AllowableValue DYNAMIC_PROPERTY_ARGUMENTS_STRATEGY = new AllowableValue(dynamicArguements,dynamicArguements,
+    static final AllowableValue DYNAMIC_PROPERTY_ARGUMENTS_STRATEGY = new AllowableValue(dynamicArguements, dynamicArguements,
             "Arguments to be supplied to the executable are taken from dynamic properties");
 
 
@@ -213,8 +215,8 @@ public class ExecuteStreamCommand extends AbstractProcessor {
             .description("Strategy for configuring arguments to be supplied to the command.")
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .required(false)
-            .allowableValues(EXECUTION_ARGUMENTS_PROPERTY_STRATEGEY.getValue(),DYNAMIC_PROPERTY_ARGUMENTS_STRATEGY.getValue())
-            .defaultValue(EXECUTION_ARGUMENTS_PROPERTY_STRATEGEY.getValue())
+            .allowableValues(EXECUTION_ARGUMENTS_PROPERTY_STRATEGY.getValue(), DYNAMIC_PROPERTY_ARGUMENTS_STRATEGY.getValue())
+            .defaultValue(EXECUTION_ARGUMENTS_PROPERTY_STRATEGY.getValue())
             .build();
 
     static final PropertyDescriptor EXECUTION_ARGUMENTS = new PropertyDescriptor.Builder()
@@ -283,6 +285,7 @@ public class ExecuteStreamCommand extends AbstractProcessor {
             .build();
 
     private static final List<PropertyDescriptor> PROPERTIES;
+    private static final String MASKED_ARGUMENT = "********";
 
     static {
         List<PropertyDescriptor> props = new ArrayList<>();
@@ -342,25 +345,24 @@ public class ExecuteStreamCommand extends AbstractProcessor {
     protected PropertyDescriptor getSupportedDynamicPropertyDescriptor(final String propertyDescriptorName) {
         if (!propertyDescriptorName.startsWith("command.argument.")) {
             return new PropertyDescriptor.Builder()
-                .name(propertyDescriptorName)
-                .description(
-                    "Sets the environment variable '" + propertyDescriptorName + "' for the process' environment")
-                .dynamic(true)
-                .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-                .build();
+                    .name(propertyDescriptorName)
+                    .description(
+                            "Sets the environment variable '" + propertyDescriptorName + "' for the process' environment")
+                    .dynamic(true)
+                    .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+                    .build();
         }
         // get the number part of the name
         Matcher matcher = DYNAMIC_PARAMETER_NAME.matcher(propertyDescriptorName);
         if (matcher.matches()) {
-            final String commandIndex = matcher.group("commandIndex");
             return new PropertyDescriptor.Builder()
-                .name(propertyDescriptorName)
-                .displayName(propertyDescriptorName)
-                .description("Argument passed to command")
-                .dynamic(true)
-                .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
-                .addValidator(ATTRIBUTE_EXPRESSION_LANGUAGE_VALIDATOR)
-                .build();
+                    .name(propertyDescriptorName)
+                    .displayName(propertyDescriptorName)
+                    .description("Argument passed to command")
+                    .dynamic(true)
+                    .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+                    .addValidator(ATTRIBUTE_EXPRESSION_LANGUAGE_VALIDATOR)
+                    .build();
         }
         return null;
     }
@@ -373,6 +375,7 @@ public class ExecuteStreamCommand extends AbstractProcessor {
         }
 
         final ArrayList<String> args = new ArrayList<>();
+        final ArrayList<String> argumentAttributeValue = new ArrayList<>();
         final boolean putToAttribute = context.getProperty(PUT_OUTPUT_IN_ATTRIBUTE).isSet();
         final PropertyValue argumentsStrategyPropertyValue = context.getProperty(ARGUMENTS_STRATEGY);
         final boolean useDynamicPropertyArguments = argumentsStrategyPropertyValue.isSet() && argumentsStrategyPropertyValue.getValue().equals(DYNAMIC_PROPERTY_ARGUMENTS_STRATEGY.getValue());
@@ -386,21 +389,19 @@ public class ExecuteStreamCommand extends AbstractProcessor {
         if (!useDynamicPropertyArguments) {
             commandArguments = context.getProperty(EXECUTION_ARGUMENTS).evaluateAttributeExpressions(inputFlowFile).getValue();
             if (!StringUtils.isBlank(commandArguments)) {
-                for (String arg : ArgumentUtils
-                    .splitArgs(commandArguments, context.getProperty(ARG_DELIMITER).getValue().charAt(0))) {
-                    args.add(arg);
-                }
+                args.addAll(ArgumentUtils
+                        .splitArgs(commandArguments, context.getProperty(ARG_DELIMITER).getValue().charAt(0)));
             }
         } else {
 
-            ArrayList<PropertyDescriptor> propertyDescriptors = new ArrayList<>();
+            List<PropertyDescriptor> propertyDescriptors = new ArrayList<>();
             for (final Map.Entry<PropertyDescriptor, String> entry : context.getProperties().entrySet()) {
                 Matcher matcher = DYNAMIC_PARAMETER_NAME.matcher(entry.getKey().getName());
                 if (matcher.matches()) {
                     propertyDescriptors.add(entry.getKey());
                 }
             }
-            Collections.sort(propertyDescriptors,(p1,p2) -> {
+            propertyDescriptors.sort((p1, p2) -> {
                 Matcher matcher = DYNAMIC_PARAMETER_NAME.matcher(p1.getName());
                 String indexString1 = null;
                 while (matcher.find()) {
@@ -413,38 +414,45 @@ public class ExecuteStreamCommand extends AbstractProcessor {
                 }
                 final int index1 = Integer.parseInt(indexString1);
                 final int index2 = Integer.parseInt(indexString2);
-                if ( index1 > index2 ) {
+                if (index1 > index2) {
                     return 1;
                 } else if (index1 < index2) {
                     return -1;
                 }
                 return 0;
             });
-            for ( final PropertyDescriptor descriptor : propertyDescriptors) {
-                args.add(context.getProperty(descriptor.getName()).evaluateAttributeExpressions(inputFlowFile).getValue());
-            }
-            if (args.size() > 0) {
-                final StringBuilder builder = new StringBuilder();
 
-                for ( int i = 1; i < args.size(); i++) {
-                   builder.append(args.get(i)).append("\t");
+            for (final PropertyDescriptor descriptor : propertyDescriptors) {
+                String argValue = context.getProperty(descriptor.getName()).evaluateAttributeExpressions(inputFlowFile).getValue();
+                if (descriptor.isSensitive()) {
+                    argumentAttributeValue.add(MASKED_ARGUMENT);
+                } else {
+                    argumentAttributeValue.add(argValue);
+                }
+                args.add(argValue);
+
+            }
+            if (argumentAttributeValue.size() > 0) {
+                final StringBuilder builder = new StringBuilder();
+                for (String s : argumentAttributeValue) {
+                    builder.append(s).append("\t");
                 }
                 commandArguments = builder.toString().trim();
             } else {
                 commandArguments = "";
             }
         }
-
         final String workingDir = context.getProperty(WORKING_DIR).evaluateAttributeExpressions(inputFlowFile).getValue();
 
         final ProcessBuilder builder = new ProcessBuilder();
 
-        logger.debug("Executing and waiting for command {} with arguments {}", new Object[]{executeCommand, commandArguments});
+        // Avoid logging arguments that could contain sensitive values
+        logger.debug("Executing and waiting for command: {}", executeCommand);
         File dir = null;
         if (!StringUtils.isBlank(workingDir)) {
             dir = new File(workingDir);
             if (!dir.exists() && !dir.mkdirs()) {
-                logger.warn("Failed to create working directory {}, using current working directory {}", new Object[]{workingDir, System.getProperty("user.dir")});
+                logger.warn("Failed to create working directory {}, using current working directory {}", workingDir, System.getProperty("user.dir"));
             }
         }
         final Map<String, String> environment = new HashMap<>();
@@ -484,12 +492,11 @@ public class ExecuteStreamCommand extends AbstractProcessor {
         try (final OutputStream pos = process.getOutputStream();
              final InputStream pis = process.getInputStream();
              final BufferedInputStream bis = new BufferedInputStream(pis)) {
-            int exitCode = -1;
             final BufferedOutputStream bos = new BufferedOutputStream(pos);
             FlowFile outputFlowFile = putToAttribute ? inputFlowFile : session.create(inputFlowFile);
 
             ProcessStreamWriterCallback callback = new ProcessStreamWriterCallback(ignoreStdin, bos, bis, logger,
-                    attributeName, session, outputFlowFile, process,putToAttribute,attributeSize);
+                    attributeName, session, outputFlowFile, process, putToAttribute, attributeSize);
             session.read(inputFlowFile, callback);
 
             outputFlowFile = callback.outputFlowFile;
@@ -497,8 +504,8 @@ public class ExecuteStreamCommand extends AbstractProcessor {
                 outputFlowFile = session.putAttribute(outputFlowFile, attributeName, new String(callback.outputBuffer, 0, callback.size));
             }
 
-            exitCode = callback.exitCode;
-            logger.debug("Execution complete for command: {}.  Exited with code: {}", new Object[]{executeCommand, exitCode});
+            int exitCode = callback.exitCode;
+            logger.debug("Execution complete for command: {}.  Exited with code: {}", executeCommand, exitCode);
 
             Map<String, String> attributes = new HashMap<>();
 
@@ -511,16 +518,15 @@ public class ExecuteStreamCommand extends AbstractProcessor {
             } catch (IOException e) {
                 strBldr.append("Unknown...could not read Process's Std Error");
             }
-            int length = strBldr.length() > 4000 ? 4000 : strBldr.length();
+            int length = Math.min(strBldr.length(), 4000);
             attributes.put("execution.error", strBldr.substring(0, length));
 
             final Relationship outputFlowFileRelationship = putToAttribute ? ORIGINAL_RELATIONSHIP : (exitCode != 0) ? NONZERO_STATUS_RELATIONSHIP : OUTPUT_STREAM_RELATIONSHIP;
             if (exitCode == 0) {
-                logger.info("Transferring flow file {} to {}",
-                        new Object[]{outputFlowFile,outputFlowFileRelationship.getName()});
+                logger.info("Transferring {} to {}", outputFlowFile, outputFlowFileRelationship.getName());
             } else {
-                logger.error("Transferring flow file {} to {}. Executable command {} ended in an error: {}",
-                        new Object[]{outputFlowFile,outputFlowFileRelationship.getName(), executeCommand, strBldr.toString()});
+                logger.error("Transferring {} to {}. Executable command {} ended in an error: {}",
+                        outputFlowFile, outputFlowFileRelationship.getName(), executeCommand, strBldr.toString());
             }
 
             attributes.put("execution.status", Integer.toString(exitCode));
@@ -532,20 +538,20 @@ public class ExecuteStreamCommand extends AbstractProcessor {
                 outputFlowFile = session.penalize(outputFlowFile);
             }
             // This will transfer the FlowFile that received the stream output to its destined relationship.
-            // In the event the stream is put to the an attribute of the original, it will be transferred here.
+            // In the event the stream is put to an attribute of the original, it will be transferred here.
             session.transfer(outputFlowFile, outputFlowFileRelationship);
 
             if (!putToAttribute) {
-                logger.info("Transferring flow file {} to original", new Object[]{inputFlowFile});
+                logger.info("Transferring {} to original", inputFlowFile);
                 inputFlowFile = session.putAllAttributes(inputFlowFile, attributes);
                 session.transfer(inputFlowFile, ORIGINAL_RELATIONSHIP);
             }
 
-        } catch (final IOException ex) {
+        } catch (final IOException e) {
             // could not close Process related streams
-            logger.warn("Problem terminating Process {}", new Object[]{process}, ex);
+            logger.warn("Problem terminating Process {}", process, e);
         } finally {
-            errorOut.delete();
+            FileUtils.deleteQuietly(errorOut);
             process.destroy(); // last ditch effort to clean up that process.
         }
     }
@@ -567,7 +573,7 @@ public class ExecuteStreamCommand extends AbstractProcessor {
         byte[] outputBuffer;
         int size;
 
-        public ProcessStreamWriterCallback(boolean ignoreStdin, OutputStream stdinWritable, InputStream stdoutReadable,ComponentLog logger, String attributeName,
+        public ProcessStreamWriterCallback(boolean ignoreStdin, OutputStream stdinWritable, InputStream stdoutReadable, ComponentLog logger, String attributeName,
                                            ProcessSession session, FlowFile outputFlowFile, Process process, boolean putToAttribute, int attributeSize) {
             this.ignoreStdin = ignoreStdin;
             this.stdinWritable = stdinWritable;
@@ -588,11 +594,11 @@ public class ExecuteStreamCommand extends AbstractProcessor {
                     readStdoutReadable(ignoreStdin, stdinWritable, logger, incomingFlowFileIS);
                     final long longSize = StreamUtils.copy(stdoutReadable, softLimitBoundedBAOS);
 
-                    // Because the outputstream has a cap that the copy doesn't know about, adjust
+                    // Because the outputStream has a cap that the copy doesn't know about, adjust
                     // the actual size
                     if (longSize > attributeSize) { // Explicit cast for readability
                         size = attributeSize;
-                    } else{
+                    } else {
                         size = (int) longSize; // Note: safe cast, longSize is limited by attributeSize
                     }
 
@@ -606,17 +612,13 @@ public class ExecuteStreamCommand extends AbstractProcessor {
                     }
                 }
             } else {
-                outputFlowFile = session.write(outputFlowFile, new OutputStreamCallback() {
-                    @Override
-                    public void process(OutputStream out) throws IOException {
-
-                        readStdoutReadable(ignoreStdin, stdinWritable, logger, incomingFlowFileIS);
-                        StreamUtils.copy(stdoutReadable, out);
-                        try {
-                            exitCode = process.waitFor();
-                        } catch (InterruptedException e) {
-                            logger.warn("Command Execution Process was interrupted", e);
-                        }
+                outputFlowFile = session.write(outputFlowFile, out -> {
+                    readStdoutReadable(ignoreStdin, stdinWritable, logger, incomingFlowFileIS);
+                    StreamUtils.copy(stdoutReadable, out);
+                    try {
+                        exitCode = process.waitFor();
+                    } catch (InterruptedException e) {
+                        logger.warn("Command Execution Process was interrupted", e);
                     }
                 });
             }
@@ -624,24 +626,20 @@ public class ExecuteStreamCommand extends AbstractProcessor {
     }
 
     private static void readStdoutReadable(final boolean ignoreStdin, final OutputStream stdinWritable,
-                                           final ComponentLog logger, final InputStream incomingFlowFileIS) throws IOException {
-        Thread writerThread = new Thread(new Runnable() {
-
-            @Override
-            public void run() {
-                if (!ignoreStdin) {
-                    try {
-                        StreamUtils.copy(incomingFlowFileIS, stdinWritable);
-                    } catch (IOException e) {
-                        // This is unlikely to occur, and isn't handled at the moment
-                        // Bug captured in NIFI-1194
-                        logger.error("Failed to write flow file to stdin due to {}", new Object[]{e}, e);
-                    }
+                                           final ComponentLog logger, final InputStream incomingFlowFileIS) {
+        Thread writerThread = new Thread(() -> {
+            if (!ignoreStdin) {
+                try {
+                    StreamUtils.copy(incomingFlowFileIS, stdinWritable);
+                } catch (IOException e) {
+                    // This is unlikely to occur, and isn't handled at the moment
+                    // Bug captured in NIFI-1194
+                    logger.error("Failed to write FlowFile to Standard Input Stream", e);
                 }
-                // MUST close the output stream to the stdin so that whatever is reading knows
-                // there is no more data.
-                IOUtils.closeQuietly(stdinWritable);
             }
+            // MUST close the output stream to the stdin so that whatever is reading knows
+            // there is no more data.
+            IOUtils.closeQuietly(stdinWritable);
         });
         writerThread.setDaemon(true);
         writerThread.start();
