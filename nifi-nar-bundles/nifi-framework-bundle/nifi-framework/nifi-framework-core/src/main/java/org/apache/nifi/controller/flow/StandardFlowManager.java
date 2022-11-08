@@ -27,24 +27,8 @@ import org.apache.nifi.bundle.Bundle;
 import org.apache.nifi.bundle.BundleCoordinate;
 import org.apache.nifi.components.ConfigurableComponent;
 import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.connectable.Connectable;
-import org.apache.nifi.connectable.ConnectableType;
-import org.apache.nifi.connectable.Connection;
-import org.apache.nifi.connectable.Funnel;
-import org.apache.nifi.connectable.LocalPort;
-import org.apache.nifi.connectable.Port;
-import org.apache.nifi.controller.ConfigurationContext;
-import org.apache.nifi.controller.ControllerService;
-import org.apache.nifi.controller.ExtensionBuilder;
-import org.apache.nifi.controller.FlowController;
-import org.apache.nifi.controller.FlowSnippet;
-import org.apache.nifi.controller.ParameterProviderNode;
-import org.apache.nifi.controller.ProcessScheduler;
-import org.apache.nifi.controller.ProcessorNode;
-import org.apache.nifi.controller.ReportingTaskNode;
-import org.apache.nifi.controller.StandardFlowSnippet;
-import org.apache.nifi.controller.StandardFunnel;
-import org.apache.nifi.controller.StandardProcessorNode;
+import org.apache.nifi.connectable.*;
+import org.apache.nifi.controller.*;
 import org.apache.nifi.controller.exception.ComponentLifeCycleException;
 import org.apache.nifi.controller.exception.ProcessorInstantiationException;
 import org.apache.nifi.controller.label.Label;
@@ -60,14 +44,7 @@ import org.apache.nifi.flowfile.FlowFilePrioritizer;
 import org.apache.nifi.groups.ProcessGroup;
 import org.apache.nifi.groups.RemoteProcessGroup;
 import org.apache.nifi.groups.StandardProcessGroup;
-import org.apache.nifi.logging.ControllerServiceLogObserver;
-import org.apache.nifi.logging.FlowRegistryClientLogObserver;
-import org.apache.nifi.logging.LogLevel;
-import org.apache.nifi.logging.LogRepository;
-import org.apache.nifi.logging.LogRepositoryFactory;
-import org.apache.nifi.logging.ParameterProviderLogObserver;
-import org.apache.nifi.logging.ProcessorLogObserver;
-import org.apache.nifi.logging.ReportingTaskLogObserver;
+import org.apache.nifi.logging.*;
 import org.apache.nifi.nar.ExtensionManager;
 import org.apache.nifi.nar.NarCloseable;
 import org.apache.nifi.parameter.ParameterContextManager;
@@ -82,6 +59,7 @@ import org.apache.nifi.remote.StandardRemoteProcessGroup;
 import org.apache.nifi.remote.TransferDirection;
 import org.apache.nifi.reporting.BulletinRepository;
 import org.apache.nifi.reporting.ReportingTask;
+import org.apache.nifi.reporting.bo.KyCounter;
 import org.apache.nifi.security.util.SslContextFactory;
 import org.apache.nifi.security.util.StandardTlsConfiguration;
 import org.apache.nifi.security.util.TlsException;
@@ -94,13 +72,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLContext;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -626,6 +598,16 @@ public class StandardFlowManager extends AbstractFlowManager implements FlowMana
         extensionManager.removeInstanceClassLoader(service.getIdentifier());
 
         logger.info("{} removed from Flow Controller", service);
+    }
+
+    @Override
+    public List<KyCounter> getKyCounters() {
+        return flowController.getKyCounters();
+    }
+
+    @Override
+    public KyCounter resetKyCounter(String identifier) {
+        return flowController.resetKyCounter(identifier);
     }
 
     public ControllerServiceNode createControllerService(final String type, final String id, final BundleCoordinate bundleCoordinate, final Set<URL> additionalUrls, final boolean firstTimeAdded,

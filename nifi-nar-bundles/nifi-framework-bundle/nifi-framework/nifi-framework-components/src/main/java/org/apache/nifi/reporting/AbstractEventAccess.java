@@ -20,11 +20,7 @@ package org.apache.nifi.reporting;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.authorization.resource.Authorizable;
 import org.apache.nifi.components.validation.ValidationStatus;
-import org.apache.nifi.connectable.Connectable;
-import org.apache.nifi.connectable.ConnectableType;
-import org.apache.nifi.connectable.Connection;
-import org.apache.nifi.connectable.Funnel;
-import org.apache.nifi.connectable.Port;
+import org.apache.nifi.connectable.*;
 import org.apache.nifi.controller.ProcessScheduler;
 import org.apache.nifi.controller.ProcessorNode;
 import org.apache.nifi.controller.ScheduledState;
@@ -36,14 +32,7 @@ import org.apache.nifi.controller.repository.FlowFileEvent;
 import org.apache.nifi.controller.repository.FlowFileEventRepository;
 import org.apache.nifi.controller.repository.RepositoryStatusReport;
 import org.apache.nifi.controller.repository.metrics.EmptyFlowFileEvent;
-import org.apache.nifi.controller.status.ConnectionStatus;
-import org.apache.nifi.controller.status.LoadBalanceStatus;
-import org.apache.nifi.controller.status.PortStatus;
-import org.apache.nifi.controller.status.ProcessGroupStatus;
-import org.apache.nifi.controller.status.ProcessorStatus;
-import org.apache.nifi.controller.status.RemoteProcessGroupStatus;
-import org.apache.nifi.controller.status.RunStatus;
-import org.apache.nifi.controller.status.TransmissionStatus;
+import org.apache.nifi.controller.status.*;
 import org.apache.nifi.controller.status.analytics.ConnectionStatusPredictions;
 import org.apache.nifi.controller.status.analytics.StatusAnalytics;
 import org.apache.nifi.controller.status.analytics.StatusAnalyticsEngine;
@@ -56,15 +45,12 @@ import org.apache.nifi.registry.flow.VersionedFlowState;
 import org.apache.nifi.registry.flow.VersionedFlowStatus;
 import org.apache.nifi.remote.PublicPort;
 import org.apache.nifi.remote.RemoteGroupPort;
+import org.apache.nifi.reporting.bo.KyCounter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
@@ -83,6 +69,17 @@ public abstract class AbstractEventAccess implements EventAccess {
         this.flowManager = flowManager;
         this.flowFileEventRepository = flowFileEventRepository;
     }
+
+    @Override
+    public List<KyCounter> getKyCounters() {
+        return flowManager.getKyCounters();
+    }
+
+    @Override
+    public KyCounter resetKyCounter(String identifier) {
+        return flowManager.resetKyCounter(identifier);
+    }
+
 
     /**
      * Returns the status of all components in the specified group. This request

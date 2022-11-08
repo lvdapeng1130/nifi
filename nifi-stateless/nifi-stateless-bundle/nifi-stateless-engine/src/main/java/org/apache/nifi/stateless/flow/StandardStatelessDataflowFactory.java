@@ -190,7 +190,7 @@ public class StandardStatelessDataflowFactory implements StatelessDataflowFactor
                     .statusTaskInterval(engineConfiguration.getStatusTaskInterval())
                     .build();
 
-            final StatelessFlowManager flowManager = new StatelessFlowManager(flowFileEventRepo, parameterContextManager, statelessEngine, () -> true, sslContext, bulletinRepository);
+            final StatelessFlowManager flowManager = new StatelessFlowManager(counterRepo,flowFileEventRepo, parameterContextManager, statelessEngine, () -> true, sslContext, bulletinRepository);
             flowManager.createFlowRegistryClient(InMemoryFlowRegistry.class.getTypeName(), "in-memory-flow-registry", null, Collections.emptySet(), true, true, null);
             ((InMemoryFlowRegistry) flowManager.getFlowRegistryClient("in-memory-flow-registry").getComponent()).addFlowSnapshot(dataflowDefinition.getVersionedExternalFlow());
 
