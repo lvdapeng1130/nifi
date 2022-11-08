@@ -36,6 +36,7 @@
         <module>nifi-external</module>
         <module>nifi-docker</module>
         <module>nifi-system-tests</module>
+        <module>nifi-run</module>
         <module>minifi</module>
         <module>nifi-stateless</module>
         <module>nifi-registry</module>
@@ -1110,4 +1111,17 @@
             </build>
         </profile>
     </profiles>
+    <distributionManagement>
+        <repository>
+            <id>NifiRelease</id>
+            <name>nifiRelease</name>
+            <url>http://192.168.0.6:8081/nexus/content/repositories/NifiRelease/</url>
+        </repository>
+        <snapshotRepository>
+            <id>NifiSnapshots</id>
+            <name>nifiSnapshots</name>
+            <url>http://192.168.0.6:8081/nexus/content/repositories/NifiSnapshots/</url>
+            <uniqueVersion>true</uniqueVersion>
+        </snapshotRepository>
+    </distributionManagement>
 </project>
