@@ -29,9 +29,11 @@
     </properties>
 
     <modules>
+        <module>nifi-kafka-0-11-processors</module>
         <module>nifi-kafka-1-0-processors</module>
         <module>nifi-kafka-2-0-processors</module>
         <module>nifi-kafka-2-6-processors</module>
+        <module>nifi-kafka-0-11-nar</module>
         <module>nifi-kafka-1-0-nar</module>
         <module>nifi-kafka-2-0-nar</module>
         <module>nifi-kafka-2-6-nar</module>
