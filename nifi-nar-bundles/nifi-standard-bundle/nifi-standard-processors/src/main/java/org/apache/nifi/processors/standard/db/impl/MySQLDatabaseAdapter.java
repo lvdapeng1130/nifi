@@ -19,7 +19,9 @@ package org.apache.nifi.processors.standard.db.impl;
 import org.apache.nifi.util.StringUtils;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -51,7 +53,7 @@ public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
     }
 
     @Override
-    public void setFetchSize(final Connection con,Statement statement, Integer fetchSize) throws SQLException {
+    public void setFetchSize(final Connection con, Statement statement, Integer fetchSize) throws SQLException {
         if (fetchSize != null && fetchSize > 0) {
             statement.setFetchSize(Integer.MIN_VALUE);
         }
