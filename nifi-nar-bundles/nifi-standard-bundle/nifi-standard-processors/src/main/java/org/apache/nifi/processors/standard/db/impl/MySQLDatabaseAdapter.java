@@ -18,6 +18,8 @@ package org.apache.nifi.processors.standard.db.impl;
 
 import org.apache.nifi.util.StringUtils;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -44,6 +46,16 @@ public class MySQLDatabaseAdapter extends GenericDatabaseAdapter {
     }
 
     @Override
+    public Statement getStatement(Connection con) throws SQLException {
+        return con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+    }
+
+    @Override
+    public void setFetchSize(final Connection con,Statement statement, Integer fetchSize) throws SQLException {
+        if (fetchSize != null && fetchSize > 0) {
+            statement.setFetchSize(Integer.MIN_VALUE);
+        }
+	}
     public boolean supportsUpsert() {
         return true;
     }

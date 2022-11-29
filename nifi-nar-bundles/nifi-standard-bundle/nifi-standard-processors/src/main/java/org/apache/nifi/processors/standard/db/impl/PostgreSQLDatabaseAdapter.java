@@ -18,6 +18,10 @@ package org.apache.nifi.processors.standard.db.impl;
 
 import org.apache.nifi.util.StringUtils;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -34,6 +38,28 @@ public class PostgreSQLDatabaseAdapter extends GenericDatabaseAdapter {
     }
 
     @Override
+    public String unwrapIdentifier(String identifier) {
+        // Removes double quotes and back-ticks.
+        return identifier == null ? null : identifier.replaceAll("[\"`]", "");
+    }
+
+    @Override
+    public Statement getStatement(Connection con) throws SQLException {
+        return con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.FETCH_FORWARD);
+    }
+
+    @Override
+    public void setFetchSize(Connection con,final Statement statement,Integer fetchSize) throws SQLException {
+        if (fetchSize != null && fetchSize > 0) {
+            this.setAutoCommit(con,false);
+            statement.setFetchSize(fetchSize);
+        }
+    }
+
+    @Override
+    public void setAutoCommit(Connection con, boolean autoCommit) throws SQLException {
+        con.setAutoCommit(autoCommit);
+	}
     public boolean supportsUpsert() {
         return true;
     }
