@@ -35,6 +35,8 @@
         <module>nifi-hive_1_1-nar</module>
         <module>nifi-hive3-processors</module>
         <module>nifi-hive3-nar</module>
+        <module>nifi-hive-huawei-processors</module>
+        <module>nifi-hive-huawei-nar</module>
     </modules>
 
     <dependencyManagement>
