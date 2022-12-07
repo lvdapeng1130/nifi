@@ -369,4 +369,27 @@
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>huawei</id>
+            <properties>
+                <curator.version>2.12.0</curator.version>
+                <hive3.version>3.1.0</hive3.version>
+                <hadoop.version>3.1.1</hadoop.version>
+                <zookeeper.version>3.5.1</zookeeper.version>
+                <hbase.version>1.3.1</hbase.version>
+                <hive.version>${hive3.version}</hive.version>
+                <avatica.version>1.22.0</avatica.version>
+                <calcite.version>1.32.0</calcite.version>
+                <calcite.avatica.version>1.6.0</calcite.avatica.version>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>xml-apis</groupId>
+                    <artifactId>xml-apis</artifactId>
+                    <version>1.4.01</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>
