@@ -384,7 +384,7 @@ public class PutHDFS extends AbstractHadoopProcessor {
                                     final EnumSet<CreateFlag> cflags = EnumSet.of(CreateFlag.CREATE, CreateFlag.OVERWRITE);
 
                                     if (shouldIgnoreLocality(context, session)) {
-                                        cflags.add(CreateFlag.IGNORE_CLIENT_LOCALITY);
+                                        //cflags.add(CreateFlag.IGNORE_CLIENT_LOCALITY);//处理华为云3.1.1版本没有该字段问题
                                     }
 
                                     fos = hdfs.create(actualCopyFile, FsCreateModes.applyUMask(FsPermission.getFileDefault(),
