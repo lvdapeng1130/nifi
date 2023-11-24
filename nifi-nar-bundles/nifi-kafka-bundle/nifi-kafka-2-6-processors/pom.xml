@@ -68,7 +68,7 @@
         </dependency>
         <dependency>
             <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka_2.13</artifactId>
+            <artifactId>kafka_2.12</artifactId>
             <version>${kafka2.6.version}</version>
             <scope>test</scope>
             <exclusions>
