@@ -200,6 +200,67 @@
 
     <profiles>
         <profile>
+            <id>huawei-cbu-mrs-prd</id>
+            <properties>
+                <hive3.version>3.1.0-h0.cbu.mrs.330.r9</hive3.version>
+                <hive.version>${hive3.version}</hive.version>
+                <hbase.version>2.4.14-h0.cbu.mrs.321.r13</hbase.version>
+                <zookeeper.version>3.6.3-h0.cbu.mrs.321.r13</zookeeper.version>
+                <hadoop2.version>3.3.1-h0.cbu.mrs.321.r13</hadoop2.version>
+                <hadoop.version>3.3.1-h0.cbu.mrs.321.r13</hadoop.version>
+                <spark.version>3.3.1-h0.cbu.mrs.321.r13</spark.version>
+                <hbase1.version>2.4.14-h0.cbu.mrs.321.r13</hbase1.version>
+                <hbase.version>2.4.14-h0.cbu.mrs.321.r13</hbase.version>
+                <hbase.server.version>2.4.14-h0.cbu.mrs.321.r13</hbase.server.version>
+                <elasticsearch.version>7.10.2-h0.cbu.mrs.321.r13</elasticsearch.version>
+                <scala.binary.version>2.12</scala.binary.version>
+                <scala.version>2.12.17</scala.version>
+                <protobuf.version>2.5.0</protobuf.version>
+            </properties>
+            <repositories>
+                <repository>
+                    <id>huaweicloudsdk</id>
+                    <url>https://repo.huaweicloud.com/repository/maven/huaweicloudsdk/</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                </repository>
+            </repositories>
+            <dependencyManagement>
+              <dependencies>
+                  <dependency>
+                      <groupId>org.elasticsearch.client</groupId>
+                      <artifactId>elasticsearch-rest-client</artifactId>
+                      <version>${elasticsearch.version}</version>
+                  </dependency>
+              </dependencies>
+            </dependencyManagement>
+            <dependencies>
+                <dependency>
+                    <groupId>org.elasticsearch.client</groupId>
+                    <artifactId>elasticsearch-rest-client</artifactId>
+                    <!-- stopped at 7.13.4 as it is the last version prior to Elastic forcing the client to check it is connecting
+                     to an Elastic-provided Elasticsearch instead of an instance provided by someone else (e.g. AWS OpenSearch)
+                     see: https://opensearch.org/blog/community/2021/08/community-clients/ for more info.
+
+                     Note: the low-level elasticsearch-rest-client remains licensed with Apache 2.0
+                     (https://www.elastic.co/guide/en/elasticsearch/client/java-rest/current/_license.html) even after the move
+                     of the main Elasticsearch product and elasticsearch-rest-high-level-client to Elastic 2.0/SSPL 1.0 in v7.11.0+ -->
+                    <version>${elasticsearch.version}</version>
+                    <scope>compile</scope>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>com.vividsolutions</groupId>
+                            <artifactId>jts</artifactId>
+                        </exclusion>
+                        <exclusion>
+                            <groupId>commons-logging</groupId>
+                            <artifactId>commons-logging</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
             <id>integration-tests</id>
             <activation>
                 <activeByDefault>false</activeByDefault>
