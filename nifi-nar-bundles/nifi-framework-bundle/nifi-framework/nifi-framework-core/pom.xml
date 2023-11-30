@@ -322,5 +322,44 @@
                 </dependency>
             </dependencies>
         </profile>
+        <profile>
+            <id>huawei-cbu-mrs-prd</id>
+            <properties>
+                <hive3.version>3.1.0-h0.cbu.mrs.330.r9</hive3.version>
+                <hive.version>${hive3.version}</hive.version>
+                <hbase.version>2.4.14-h0.cbu.mrs.321.r13</hbase.version>
+                <zookeeper.version>3.6.3-h0.cbu.mrs.321.r13</zookeeper.version>
+                <hadoop2.version>3.3.1-h0.cbu.mrs.321.r13</hadoop2.version>
+                <hadoop.version>3.3.1-h0.cbu.mrs.321.r13</hadoop.version>
+                <spark.version>3.3.1-h0.cbu.mrs.321.r13</spark.version>
+                <hbase1.version>2.4.14-h0.cbu.mrs.321.r13</hbase1.version>
+                <hbase.version>2.4.14-h0.cbu.mrs.321.r13</hbase.version>
+                <hbase.server.version>2.4.14-h0.cbu.mrs.321.r13</hbase.server.version>
+                <elasticsearch.version>7.10.2-h0.cbu.mrs.321.r13</elasticsearch.version>
+                <scala.binary.version>2.12</scala.binary.version>
+                <scala.version>2.12.17</scala.version>
+                <protobuf.version>2.5.0</protobuf.version>
+            </properties>
+            <repositories>
+                <repository>
+                    <id>huaweicloudsdk</id>
+                    <url>https://repo.huaweicloud.com/repository/maven/huaweicloudsdk/</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                </repository>
+            </repositories>
+            <dependencies>
+                <dependency>
+                    <groupId>xml-apis</groupId>
+                    <artifactId>xml-apis</artifactId>
+                    <version>1.4.01</version>
+                </dependency>
+                <dependency>
+                    <groupId>com.huawei.mrs</groupId>
+                    <artifactId>hadoop-plugins</artifactId>
+                    <version>8.3.0-330.r9</version>
+                </dependency>
+            </dependencies>
+        </profile>
     </profiles>
 </project>
