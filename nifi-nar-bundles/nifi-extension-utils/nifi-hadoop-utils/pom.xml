@@ -186,6 +186,13 @@
                     <snapshots><enabled>true</enabled></snapshots>
                 </repository>
             </repositories>
+            <dependencies>
+                <dependency>
+                    <groupId>com.huawei.mrs</groupId>
+                    <artifactId>hadoop-plugins</artifactId>
+                    <version>8.3.0-330.r9</version>
+                </dependency>
+            </dependencies>
         </profile>
     </profiles>
 </project>
