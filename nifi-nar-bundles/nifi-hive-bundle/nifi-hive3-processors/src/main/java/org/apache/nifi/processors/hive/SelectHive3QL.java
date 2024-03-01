@@ -308,13 +308,9 @@ public class SelectHive3QL extends AbstractHive3QLProcessor {
 
     @Override
     public void onTrigger(ProcessContext context, ProcessSessionFactory sessionFactory) throws ProcessException {
-        PartialFunctions.onTrigger(context, sessionFactory, getLogger(), session -> onTrigger(context, session));
-    }
-
-    private void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
+        ProcessSession session = sessionFactory.createSession();
         FlowFile fileToProcess = (context.hasIncomingConnection() ? session.get() : null);
         FlowFile flowfile = null;
-
         // If we have no FlowFile, and all incoming connections are self-loops then we can continue on.
         // However, if we have no FlowFile and we have connections coming from other Processors, then
         // we know that we should run only if we have a FlowFile.
@@ -447,7 +443,7 @@ public class SelectHive3QL extends AbstractHive3QLProcessor {
                     }
                     long fetchTimeElapsed = fetchTime.getElapsed(TimeUnit.MILLISECONDS);
 
-                    if (nrOfRows.get() > 0 || resultSetFlowFiles.isEmpty()) {
+                    if (nrOfRows.get() > 0) {
                         final Map<String, String> attributes = new HashMap<>();
                         // Set attribute for how many rows were selected
                         attributes.put(RESULT_ROW_COUNT, String.valueOf(nrOfRows.get()));
@@ -502,8 +498,11 @@ public class SelectHive3QL extends AbstractHive3QLProcessor {
                     }
 
                     fragmentIndex++;
-                    if (maxFragments > 0 && fragmentIndex >= maxFragments) {
-                        break;
+                    if (maxFragments > 0 && resultSetFlowFiles.size()>=maxFragments) {
+                        session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
+                        session.transfer(resultSetFlowFiles, REL_SUCCESS);
+                        session.commitAsync();
+                        resultSetFlowFiles.clear();
                     }
                 }
 
@@ -530,7 +529,10 @@ public class SelectHive3QL extends AbstractHive3QLProcessor {
                 throw failure.getRight();
             }
 
-            session.transfer(resultSetFlowFiles, REL_SUCCESS);
+            if(resultSetFlowFiles.size()>0) {
+                session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
+                session.transfer(resultSetFlowFiles, REL_SUCCESS);
+            }
             if (fileToProcess != null) {
                 session.remove(fileToProcess);
             }
@@ -554,7 +556,13 @@ public class SelectHive3QL extends AbstractHive3QLProcessor {
                 }
                 session.transfer(flowfile, REL_FAILURE);
             }
+        }finally {
+            session.commitAsync();
         }
+    }
+
+    private void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
+
     }
 
     /*
