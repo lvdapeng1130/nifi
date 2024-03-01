@@ -291,10 +291,7 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
 
     @Override
     public void onTrigger(ProcessContext context, ProcessSessionFactory sessionFactory) throws ProcessException {
-        PartialFunctions.onTrigger(context, sessionFactory, getLogger(), session -> onTrigger(context, session));
-    }
-
-    private void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
+        ProcessSession session = sessionFactory.createSession();
         FlowFile fileToProcess = (context.hasIncomingConnection() ? session.get() : null);
         FlowFile flowfile = null;
 
@@ -427,7 +424,7 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                     }
                     long fetchTimeElapsed = fetchTime.getElapsed(TimeUnit.MILLISECONDS);
 
-                    if (nrOfRows.get() > 0 || resultSetFlowFiles.isEmpty()) {
+                    if (nrOfRows.get() > 0) {
                         final Map<String, String> attributes = new HashMap<>();
                         // Set attribute for how many rows were selected
                         attributes.put(RESULT_ROW_COUNT, String.valueOf(nrOfRows.get()));
@@ -482,8 +479,11 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                     }
 
                     fragmentIndex++;
-                    if (maxFragments > 0 && fragmentIndex >= maxFragments) {
-                        break;
+                    if (maxFragments > 0 && resultSetFlowFiles.size()>=maxFragments) {
+                        session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
+                        session.transfer(resultSetFlowFiles, REL_SUCCESS);
+                        session.commitAsync();
+                        resultSetFlowFiles.clear();
                     }
                 }
 
@@ -510,7 +510,10 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                 throw failure.getRight();
             }
 
-            session.transfer(resultSetFlowFiles, REL_SUCCESS);
+            if(resultSetFlowFiles.size()>0) {
+                session.adjustCounter("read sizes", resultSetFlowFiles.size(), false);//ldp20200416
+                session.transfer(resultSetFlowFiles, REL_SUCCESS);
+            }
             if (fileToProcess != null) {
                 session.remove(fileToProcess);
             }
@@ -533,7 +536,13 @@ public class SelectHiveQL extends AbstractHiveQLProcessor {
                 }
                 session.transfer(flowfile, REL_FAILURE);
             }
+        }finally {
+            session.commitAsync();
         }
+    }
+
+    private void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
+
     }
 
     /*
