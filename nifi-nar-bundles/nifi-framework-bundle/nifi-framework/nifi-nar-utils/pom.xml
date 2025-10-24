@@ -62,9 +62,9 @@
             </plugin>
             <plugin>
                 <!-- latest (1.11) version of org.codehaus.mojo:aspectj-maven-plugin does not support Java 11, using com.nickwongdev fork instead -->
-                <groupId>org.codehaus.mojo</groupId>
+                <groupId>dev.aspectj</groupId>
                 <artifactId>aspectj-maven-plugin</artifactId>
-                <version>1.15.0</version>
+                <version>1.14.1</version>
                 <dependencies>
                     <dependency>
                         <groupId>org.aspectj</groupId>
