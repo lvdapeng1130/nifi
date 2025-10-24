@@ -119,7 +119,7 @@
         <module>nifi-box-bundle</module>
         <module>nifi-flow-registry-client-bundle</module>
         <module>nifi-shopify-bundle</module>
-        <module>nifi-file-identity-provider-bundle</module>
+        <!--<module>nifi-file-identity-provider-bundle</module>-->
     </modules>
 
     <build>
